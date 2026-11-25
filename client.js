@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.6";
+	const VERSION = "0.5.7";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -421,6 +421,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		const [notice, setNotice] = useState({ text: "", busy: false });
 		// 放在最后：宿主回 still-live 时才置真，用来显示「强制结束并删除」
 		const [forceAvail, setForceAvail] = useState(false);
+		const host = useHostInfo();
+		const canForce = hostCaps(host, "force");
 
 		const sessionId = req ? req.sessionId : null;
 
@@ -598,6 +600,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				setError(String(err && err.message ? err.message : err));
 				// 宿主说“这个会话还开着”：给一个强制入口，不强求用户先去切换
 				setForceAvail(!forced && Boolean(err && err.code === "still-live"));
+				// 老宿主不认 force：把它当成"版本没对上"，下面会渲染成重启提示
 				setBusy(false);
 			}
 		};
@@ -608,6 +611,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		body.push(h("div", { key: "hint", className: "dst-hint" }, t("dialog.hint")));
 
 		if (loading) body.push(h("div", { key: "loading", className: "dst-hint" }, t("dialog.loading")));
+
+		const mismatch = h(HostMismatch, { key: "mismatch", info: host });
+		if (mismatch) body.push(mismatch);
 
 		if (plan) {
 			body.push(h("div", { key: "card", className: "dst-card" },
@@ -856,6 +862,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		if (notice.text) body.push(h("div", { key: "notice", className: "dst-hint" }, notice.text));
 
 		if (error) body.push(h("div", { key: "error", className: "dst-error" }, error));
+		if (forceAvail && !canForce) {
+			body.push(h("div", { key: "forceblocked", className: "dst-hint" }, t("host.forceUnavailable")));
+		}
 
 		body.push(h("div", { key: "credit", className: "dst-credit" }, t("credit.line").replace("{v}", VERSION)));
 
@@ -874,7 +883,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			// 宿主说“会话还开着”时才出现：不逼用户先去切标签，直接硬停再删
 			if (forceAvail) {
 				ops.push(h("button", {
-					key: "force", type: "button", className: "dst-btn danger", onClick: () => confirm(true), disabled: busy,
+					key: "force", type: "button", className: "dst-btn danger",
+					onClick: () => confirm(true),
+					disabled: busy || !canForce,
+					title: canForce ? t("dialog.forceHint") : t("host.staleHint"),
 				}, busy ? t("dialog.deleting") : t("dialog.force")));
 			}
 			ops.push(h("button", {
@@ -1141,6 +1153,74 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				h("div", { className: "dst-ops" }, ops)));
 	}
 
+	/* ------------------------------------------------- 宿主信息（版本 / 能力） */
+
+	// 界面是磁盘上最新的 client.js，但宿主侧插件是 DSH 启动那一刻加载进内存的。
+	// 只刷新窗口不重启进程时，两边版本就会错开：新界面调老宿主的 op 只会得到
+	// "unknown op"。所以先 ping 一次，把宿主版本和能力记下来，按能力决定露出哪些按钮。
+	let hostInfo = null;
+	let hostInfoFlight = null;
+	const hostInfoWatchers = new Set();
+
+	function publishHostInfo(next) {
+		hostInfo = next;
+		for (const fn of [...hostInfoWatchers]) {
+			try { fn(hostInfo); } catch { /* ignore */ }
+		}
+	}
+
+	function loadHostInfo() {
+		if (hostInfoFlight) return hostInfoFlight;
+		hostInfoFlight = apiBody({ op: "ping" }, 15000)
+			.then((data) => {
+				publishHostInfo({
+					version: String((data && data.version) || ""),
+					caps: (data && data.caps) || {},
+					reached: true,
+				});
+			})
+			.catch(() => {
+				publishHostInfo({ version: "", caps: {}, reached: false });
+			})
+			.finally(() => { hostInfoFlight = null; });
+		return hostInfoFlight;
+	}
+
+	function useHostInfo() {
+		const [value, setValue] = useState(hostInfo);
+		useEffect(() => {
+			hostInfoWatchers.add(setValue);
+			if (hostInfo) setValue(hostInfo);
+			else loadHostInfo();
+			return () => { hostInfoWatchers.delete(setValue); };
+		}, []);
+		return value;
+	}
+
+	/**
+	 * 宿主能力查询。
+	 * 还没拿到（或 ping 不通）时按“支持”处理——把按钮全灰掉只会让人以为坏了；
+	 * 真正的旧宿主会正常应答 ping，那时 caps 里就是明确没有，才会置灰。
+	 */
+	function hostCaps(info, name) {
+		if (!info || info.reached !== true) return true;
+		return Boolean(info.caps && info.caps[name] === true);
+	}
+
+	/**
+	 * 宿主和界面对不上时的一条提醒。
+	 * 只在两边版本都拿到了、且确实不同的时候才说话。
+	 */
+	function HostMismatch({ info }) {
+		const t = useT();
+		if (!info || !info.reached) return null;
+		if (!info.version || info.version === VERSION) return null;
+		return h("div", { className: "dst-error" },
+			t("host.stale")
+				.replace("{host}", info.version)
+				.replace("{ui}", VERSION));
+	}
+
 	/* ------------------------------------------------- 回收站面板（v0.5.5） */
 
 	let trashPending = null;
@@ -1192,6 +1272,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		const [busy, setBusy] = useState("");
 		const [notice, setNotice] = useState("");
 		const [confirmPurge, setConfirmPurge] = useState("");
+		// 放在最后：宿主能力（hook 顺序固定，别插在中间）
+		const host = useHostInfo();
+		const canPurge = hostCaps(host, "purge");
 
 		const load = useCallback(() => {
 			setBusy("load");
@@ -1260,6 +1343,11 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		const body = [];
 		body.push(h("div", { key: "title", className: "dst-title" }, t("trash.title")));
 		body.push(h("div", { key: "hint", className: "dst-hint" }, t("trash.hint").replace("{days}", "7")));
+		const mismatch = h(HostMismatch, { key: "mismatch", info: host });
+		if (mismatch) body.push(mismatch);
+		if (host && host.reached && host.version && host.version !== VERSION) {
+			body.push(h("div", { key: "nopurge", className: "dst-hint" }, t("host.staleHint")));
+		}
 
 		if (totals) {
 			body.push(h("div", { key: "card", className: "dst-card" },
@@ -1282,7 +1370,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					h("span", { className: "dst-trash-when" }, row.createdAt ? String(row.createdAt).replace("T", " ").slice(0, 16) : ""),
 					h("span", { className: "dst-list-path", title: row.token },
 						(row.title || row.sessionId || row.token) + (row.hasRecord ? "　·　" + t("trash.hasRecord") : "")),
-					h("span", { className: "dst-trash-size" }, humanBytes(row.bytes || 0)),
+					h("span", { className: "dst-trash-size" },
+						typeof row.bytes === "number" ? humanBytes(row.bytes) : "—"),
 					h("span", { className: "dst-row-actions" },
 						h("button", {
 							type: "button", className: "dst-mini", disabled: busy === "restore",
@@ -1292,10 +1381,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 							type: "button", className: "dst-mini", onClick: () => reveal(row.token),
 						}, t("trash.reveal")),
 						h("button", {
-							type: "button", className: "dst-mini danger" + (confirmPurge === row.token ? " armed" : ""),
-							disabled: busy === "purge",
+							type: "button",
+							className: "dst-mini danger" + (confirmPurge === row.token && canPurge ? " armed" : ""),
+							disabled: busy === "purge" || !canPurge,
+							title: canPurge ? t("trash.purge") : t("host.staleHint"),
 							onClick: () => purge(row.token),
-						}, confirmPurge === row.token ? t("trash.purgeConfirm") : t("trash.purge")))))));
+						}, !canPurge
+							? t("trash.purgeUnavailable")
+							: confirmPurge === row.token ? t("trash.purgeConfirm") : t("trash.purge")))))));
 		}
 
 		if (notice) body.push(h("div", { key: "notice", className: "dst-hint" }, notice));
@@ -1344,7 +1437,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-list-head{display:flex;align-items:center;gap:8px;margin-top:2px}
 .dst-list-head .dst-hint{flex:1;min-width:0}
 .dst-list-actions{display:flex;gap:6px;flex:none}
-.dst-mini{appearance:none;border:1px solid var(--dsw-alias-border-l1,#444);background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:6px;padding:2px 8px;cursor:pointer;font:11.5px/1.4 inherit}
+.dst-mini{appearance:none;border:1px solid var(--dsw-alias-border-l1,#444);background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:6px;padding:2px 8px;cursor:pointer;font:11.5px/1.4 inherit;font-weight:600}
 .dst-mini:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14))}
 .dst-list-row{display:flex;align-items:center;gap:8px;padding:2px 4px;border-radius:4px;cursor:pointer}
 .dst-list-row input{flex:none;margin:0;cursor:pointer}
@@ -1418,18 +1511,21 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-trash-when{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84);font-size:11px}
 .dst-trash-size{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84);font-size:11px}
 .dst-trash-row .dst-row-actions{opacity:1}
-.dst-mini.danger{color:#e2a1a1}
-.dst-mini.danger.armed{background:rgba(190,80,80,.24);border-color:rgba(220,120,120,.6)}
-.dst-mini:disabled{opacity:.45;cursor:default}.dst-credit{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary,#8d8a84);text-align:right;letter-spacing:.02em}
+.dst-mini.danger{color:#e57373;border-color:#8a2b27}
+.dst-mini.danger.armed{background:#b4342f;border-color:#b4342f;color:#fff}
+.dst-mini:disabled{opacity:.6;cursor:default}.dst-credit{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary,#8d8a84);text-align:right;letter-spacing:.02em}
 .dst-done{padding:8px 10px;border-radius:8px;background:rgba(90,170,120,.16);color:#a9dcb8;font-size:12.5px}
 .dst-warn{padding:8px 10px;border-radius:8px;background:rgba(190,160,80,.16);color:#e8d29a;font-size:12.5px;line-height:1.5}
 .dst-error{padding:8px 10px;border-radius:8px;background:rgba(190,80,80,.18);color:#f0b5b5;font-size:12.5px;word-break:break-word}
 .dst-ops{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
-.dst-btn{appearance:none;border:1px solid var(--dsw-alias-border-l1,#444);background:transparent;color:inherit;border-radius:8px;padding:7px 14px;cursor:pointer;font:13px/1.2 inherit}
-.dst-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14))}
-.dst-btn:disabled{opacity:.45;cursor:default}
-.dst-btn.primary{background:rgba(120,160,190,.2);border-color:rgba(150,190,220,.5)}
-.dst-btn.danger{background:rgba(190,80,80,.22);border-color:rgba(220,120,120,.55);color:#f4c7c7}
+.dst-btn{appearance:none;border:1px solid var(--dsw-alias-border-l1,#444);background:transparent;color:inherit;border-radius:8px;padding:7px 14px;cursor:pointer;font:13px/1.2 inherit;font-weight:600}
+.dst-btn:hover:not(:disabled){filter:brightness(1.18)}
+.dst-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.15)}
+.dst-btn.primary{background:rgba(120,160,190,.28);border-color:rgba(150,190,220,.7);color:#e8f2f8}
+/* 危险操作要一眼看清：实心红底 + 白字，禁用时保留可读性而不是糊成一片 */
+.dst-btn.danger{background:#b4342f;border-color:#b4342f;color:#fff}
+.dst-btn.danger:hover:not(:disabled){background:#c93a34;border-color:#c93a34;filter:none}
+.dst-btn.danger:disabled{background:#8a2b27;border-color:#8a2b27;color:#f7dedd;opacity:.75}
 `;
 
 	function StyleTag() {
@@ -1530,7 +1626,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "完成：成功 {ok} 个，失败 {fail} 个。",
 		"dialog.force": "强制结束并删除",
 		"dialog.forceHint": "先取消正在跑的回合，再硬拆宿主里的会话对象，然后删文件。若它还开在别的面板里，那个面板会报读取失败——这属于预期。",
-		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"trash.open": "回收站",
+		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
+		"host.staleHint": "这条需要宿主侧重启后才可用：完全退出 DSH 再启动。",
+		"host.forceUnavailable": "宿主侧还是旧版本，不认强制删除。完全退出 DSH 再启动一次就能用。",
+		"trash.purgeUnavailable": "需重启",		"trash.open": "回收站",
 		"trash.title": "回收站",
 		"trash.hint": "删掉的东西（产物文件、会话记录、投影缓存）先放在这里，超 {days} 天自动清理。点「还原」能原路搬回去。",
 		"trash.batches": "批次",
@@ -1636,7 +1735,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "Done: {ok} succeeded, {fail} failed.",
 		"dialog.force": "Force delete",
 		"dialog.forceHint": "Cancels the running turn, tears the live session out of the host, then deletes the files. Any other panel still showing it will fail to read — that is expected.",
-		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"trash.open": "Recycle bin",
+		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
+		"host.staleHint": "Needs a host restart: quit DSH completely, then start it again.",
+		"host.forceUnavailable": "The host side is an older build and does not know force delete. Quit DSH completely and start it again.",
+		"trash.purgeUnavailable": "Restart needed",		"trash.open": "Recycle bin",
 		"trash.title": "Recycle bin",
 		"trash.hint": "Deleted files, session records and caches wait here for {days} days. Restore puts them back where they came from.",
 		"trash.batches": "Batches",
@@ -1708,6 +1810,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	exports.name = name;
 	exports.inject = inject;
 	exports.apply = apply;
+	// 只给自测用：把纯函数挂出来，免得为了测一句文案去抠渲染树。
+	apply.__test = { hostCaps, HostMismatch, VERSION };
 	return module.exports;
 }
 });

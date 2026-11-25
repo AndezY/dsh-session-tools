@@ -136,6 +136,31 @@ assert.equal(purgeBad.data.ok, false)
 const openBad2 = await call({ op: 'openTrash', token: '../etc' })
 assert.equal(openBad2.data.ok, false)
 console.log('trash ops ok: 列表带 totals，越界 token 被拒')
+// purgeEntry：回收站里“彻底删除一批”要真能删掉（之前只测了非法 token）
+const purgeSid = 'session-route-purge-9999-8888-777766665555'
+const purgeSessionDir = path.join(tmpHome, 'sessions', '--tmp--', purgeSid)
+fs.mkdirSync(purgeSessionDir, { recursive: true })
+fs.writeFileSync(
+  path.join(purgeSessionDir, 'session.v4.jsonl.zstd'),
+  zlib.zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: purgeSid, cwd: wsDir }) + '\n', 'utf8')),
+)
+const trashed = await call({ op: 'delete', sessionId: purgeSid, deleteArtifacts: false, trash: true })
+assert.equal(trashed.data.ok, true, JSON.stringify(trashed.data))
+const token = trashed.data.logs && trashed.data.logs.trashToken
+assert.ok(token, 'trash token issued')
+const listedBefore = await call({ op: 'trash' })
+assert.ok(listedBefore.data.entries.some((row) => row.token === token), 'batch listed')
+const purged = await call({ op: 'purgeEntry', token })
+assert.equal(purged.data.ok, true, JSON.stringify(purged.data))
+assert.ok(purged.data.bytes >= 0, 'bytes reported')
+const listedAfter = await call({ op: 'trash' })
+assert.equal(listedAfter.data.entries.some((row) => row.token === token), false, 'batch gone from the listing')
+console.log('purgeEntry ok: 一批从列表到磁盘都被清掉')
+
+const caps = await call({ op: 'ping' })
+assert.equal(caps.data.caps.purge, true, 'host advertises purge')
+assert.equal(caps.data.caps.force, true, 'host advertises force')
+console.log('caps ok: purge / force 都对外声明，界面才能按能力放按钮')
 // force：会话还挂在宿主里 → 普通删除报 still-live，强制删除照删不误
 const forceSessionId = 'session-route-force-1111-2222-333333333333'
 const forceDir = path.join(tmpHome, 'sessions', '--tmp--', forceSessionId)

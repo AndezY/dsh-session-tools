@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-tools",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "DSH 会话删除插件 · 原创作者 Weilong（MIT 开源）：真删除、逐条勾选保留、悬停预览、回收站撤销、产物导出。",
   "author": {
     "name": "Weilong"

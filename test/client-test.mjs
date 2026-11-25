@@ -610,6 +610,27 @@ assert.ok(textTrash.includes('回收站'), 'trash option rendered')
   console.log('batch ok: 菜单项 + 候选列表')
 }
 
+// ---- 宿主版本对不上：要明确说出来，而不是让人对着按钮发呆
+{
+  const api = loaded.exports.apply.__test
+  assert.ok(api && typeof api.HostMismatch === 'function', 'test hooks exposed')
+  const HostMismatch = api.HostMismatch
+  assert.equal(api.hostCaps(null, 'purge'), true, 'unknown host counts as capable')
+  assert.equal(api.hostCaps({ reached: true, caps: { purge: true } }, 'purge'), true)
+  assert.equal(api.hostCaps({ reached: true, caps: {} }, 'purge'), false, 'old host reports no purge capability')
+
+  const stale = HostMismatch({ info: { version: '0.0.1', caps: {}, reached: true } })
+  const staleText = JSON.stringify(stale)
+  assert.ok(staleText.includes('0.0.1') && staleText.includes(api.VERSION), 'both versions shown')
+
+  const same = HostMismatch({ info: { version: api.VERSION, caps: {}, reached: true } })
+  assert.equal(same, null, 'nothing rendered when versions match')
+
+  const unknown = HostMismatch({ info: { version: '', caps: {}, reached: false } })
+  assert.equal(unknown, null, 'nothing rendered when the host never answered')
+  console.log('host mismatch ok: 版本不同才提示，一致或拿不到就静默')
+}
+
 // ---- 强制结束并删除：宿主回 still-live 时给入口，点了带 force 重发
 {
   const openDialog = (states) => {
