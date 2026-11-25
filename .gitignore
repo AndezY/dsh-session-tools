@@ -1,0 +1,17 @@
+# 构建产物（由 dist/build-installer.ps1 生成，不入库）
+dist/*.zip
+dist/*.cmd
+dist/*.exe
+
+# 安装器跑出来的备份
+*.bak-*
+package.json.bak-*
+
+# 依赖与系统杂物
+node_modules/
+.DS_Store
+Thumbs.db
+
+# 内部草稿
+功能报告-v0.5.md
+tmp/

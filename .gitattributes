@@ -1,0 +1,8 @@
+# 统一换行：仓库里存 LF，检出按平台转换
+* text=auto eol=lf
+
+# 二进制，不做换行转换
+*.png binary
+*.jpg binary
+*.zip binary
+*.ico binary

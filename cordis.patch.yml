@@ -1,0 +1,8 @@
+# dsh-session-tools bundle patch
+#
+# 只插入本插件自身条目：host 半侧注入 webServer 挂 /session-tools/api，
+# client 半侧往会话行 “…” 菜单里加一行 “删除会话…”。
+- insert:
+    - id: dsh-session-tools
+      name: 'dsh-session-tools'
+      inject: [webServer]

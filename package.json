@@ -1,0 +1,58 @@
+{
+  "name": "dsh-session-tools",
+  "version": "0.5.4",
+  "description": "DSH 会话删除插件 · 原创作者 Weilong（MIT 开源）：真删除、逐条勾选保留、悬停预览、回收站撤销、产物导出。",
+  "author": {
+    "name": "Weilong"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndezY/dsh-session-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AndezY/dsh-session-tools/issues"
+  },
+  "homepage": "https://github.com/AndezY/dsh-session-tools#readme",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./core": "./lib/core.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "session",
+    "session-delete",
+    "weilong"
+  ],
+  "license": "MIT",
+  "dshTarget": "0.2.0-rc.2"
+}
