@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.4";
+	const VERSION = "0.5.5";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -1124,6 +1124,192 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				h("div", { className: "dst-ops" }, ops)));
 	}
 
+	/* ------------------------------------------------- 回收站面板（v0.5.5） */
+
+	let trashPending = null;
+	const trashWatchers = new Set();
+
+	function setTrash(next) {
+		trashPending = next;
+		for (const fn of [...trashWatchers]) {
+			try { fn(trashPending); } catch { /* ignore */ }
+		}
+	}
+
+	function useTrash() {
+		const [value, setValue] = useState(trashPending);
+		useEffect(() => {
+			trashWatchers.add(setValue);
+			setValue(trashPending);
+			return () => { trashWatchers.delete(setValue); };
+		}, []);
+		return value;
+	}
+
+	function openTrashPanel() { setTrash({ open: true }); }
+
+	function TrashActionButton(props) {
+		const t = useT();
+		const wide = props && props.wide !== false;
+		return h("button", {
+			type: "button",
+			className: "dst-footer-btn",
+			title: t("trash.open"),
+			"aria-label": t("trash.open"),
+			onClick: (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				openTrashPanel();
+			},
+		},
+			h(BinIcon),
+			wide ? h("span", null, t("trash.open")) : null);
+	}
+
+	function TrashDialog() {
+		const t = useT();
+		const req = useTrash();
+		const [entries, setEntries] = useState(null);
+		const [root, setRoot] = useState("");
+		const [totals, setTotals] = useState(null);
+		const [busy, setBusy] = useState("");
+		const [notice, setNotice] = useState("");
+		const [confirmPurge, setConfirmPurge] = useState("");
+
+		const load = useCallback(() => {
+			setBusy("load");
+			apiBody({ op: "trash" }, 30000)
+				.then((data) => {
+					setEntries(data.entries || []);
+					setRoot(data.root || "");
+					setTotals(data.totals || null);
+				})
+				.catch((err) => setNotice(t("trash.loadFailed").replace("{msg}", String(err && err.message ? err.message : err))))
+				.finally(() => setBusy(""));
+		}, [t]);
+
+		useEffect(() => {
+			if (!req) { setEntries(null); setNotice(""); setConfirmPurge(""); setBusy(""); return; }
+			load();
+		}, [req, load]);
+
+		if (!req) return null;
+
+		const close = () => { if (busy !== "restore") setTrash(null); };
+
+		const restore = async (token) => {
+			setBusy("restore");
+			setNotice("");
+			try {
+				const result = await apiBody({ op: "restore", token }, 120000);
+				const parts = [t("undo.done").replace("{n}", String((result.restored || []).length))];
+				if (result.recordRestored) parts.push(t("trash.recordBack"));
+				if (result.conflicts && result.conflicts.length > 0) parts.push(t("undo.conflicts").replace("{n}", String(result.conflicts.length)));
+				if (result.failed && result.failed.length > 0) parts.push(t("undo.failed").replace("{n}", String(result.failed.length)));
+				setNotice(parts.join("　"));
+				try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+				load();
+			} catch (err) {
+				setNotice(t("undo.error").replace("{msg}", String(err && err.message ? err.message : err)));
+			} finally {
+				setBusy("");
+			}
+		};
+
+		const purge = async (token) => {
+			if (confirmPurge !== token) { setConfirmPurge(token); return; }
+			setBusy("purge");
+			setNotice("");
+			try {
+				await apiBody({ op: "purgeEntry", token }, 60000);
+				setConfirmPurge("");
+				setNotice(t("trash.purged"));
+				load();
+			} catch (err) {
+				setNotice(t("trash.purgeFailed").replace("{msg}", String(err && err.message ? err.message : err)));
+			} finally {
+				setBusy("");
+			}
+		};
+
+		const reveal = async (token) => {
+			try {
+				await apiBody({ op: "openTrash", token }, 30000);
+			} catch (err) {
+				setNotice(t("trash.openFailed").replace("{msg}", String(err && err.message ? err.message : err)));
+			}
+		};
+
+		const body = [];
+		body.push(h("div", { key: "title", className: "dst-title" }, t("trash.title")));
+		body.push(h("div", { key: "hint", className: "dst-hint" }, t("trash.hint").replace("{days}", "7")));
+
+		if (totals) {
+			body.push(h("div", { key: "card", className: "dst-card" },
+				h(Row, { label: t("trash.batches"), value: String(totals.batches || 0) }),
+				h(Row, { label: t("trash.filesTotal"), value: String(totals.files || 0) }),
+				h(Row, { label: t("trash.sizeTotal"), value: humanBytes(totals.bytes || 0) })));
+		}
+
+		if (busy === "load" && entries === null) {
+			body.push(h("div", { key: "loading", className: "dst-hint" }, t("dialog.loading")));
+		}
+
+		if (entries !== null && entries.length === 0) {
+			body.push(h("div", { key: "empty", className: "dst-hint" }, t("trash.empty")));
+		}
+
+		if (entries && entries.length > 0) {
+			body.push(h("div", { key: "list", className: "dst-list dst-trash" },
+				entries.map((row) => h("div", { key: row.token, className: "dst-list-row dst-trash-row" },
+					h("span", { className: "dst-trash-when" }, row.createdAt ? String(row.createdAt).replace("T", " ").slice(0, 16) : ""),
+					h("span", { className: "dst-list-path", title: row.token },
+						(row.title || row.sessionId || row.token) + (row.hasRecord ? "　·　" + t("trash.hasRecord") : "")),
+					h("span", { className: "dst-trash-size" }, humanBytes(row.bytes || 0)),
+					h("span", { className: "dst-row-actions" },
+						h("button", {
+							type: "button", className: "dst-mini", disabled: busy === "restore",
+							onClick: () => restore(row.token),
+						}, t("trash.restore")),
+						h("button", {
+							type: "button", className: "dst-mini", onClick: () => reveal(row.token),
+						}, t("trash.reveal")),
+						h("button", {
+							type: "button", className: "dst-mini danger" + (confirmPurge === row.token ? " armed" : ""),
+							disabled: busy === "purge",
+							onClick: () => purge(row.token),
+						}, confirmPurge === row.token ? t("trash.purgeConfirm") : t("trash.purge")))))));
+		}
+
+		if (notice) body.push(h("div", { key: "notice", className: "dst-hint" }, notice));
+		body.push(h("div", { key: "credit", className: "dst-credit" }, t("credit.line").replace("{v}", VERSION)));
+
+		const ops = [];
+		ops.push(h("button", { key: "folder", type: "button", className: "dst-btn", onClick: () => reveal("") }, t("trash.openFolder")));
+		ops.push(h("button", { key: "refresh", type: "button", className: "dst-btn", onClick: load, disabled: busy === "load" }, t("trash.refresh")));
+		ops.push(h("button", { key: "close", type: "button", className: "dst-btn primary", onClick: close }, t("dialog.close")));
+
+		return h("div", {
+			className: "dst-mask",
+			role: "dialog",
+			"aria-modal": "true",
+			onMouseDown: (event) => { if (event.target === event.currentTarget) close(); },
+		},
+			h("div", { className: "dst-modal" },
+				body,
+				h("div", { className: "dst-ops" }, ops)));
+	}
+
+	function BinIcon() {
+		return h("svg", {
+			width: 14, height: 14, viewBox: "0 0 16 16", fill: "none",
+			stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round", strokeLinejoin: "round",
+			"aria-hidden": "true", focusable: "false",
+		},
+			h("path", { d: "M2.5 4.2h11" }),
+			h("path", { d: "M6.3 4.2V3.1c0-.5.4-.9.9-.9h1.6c.5 0 .9.4.9.9v1.1" }),
+			h("path", { d: "M3.9 4.2l.6 8.2c0 .6.5 1 1.1 1h4.8c.6 0 1.1-.4 1.1-1l.6-8.2" }));
+	}
 	/* ------------------------------------------------------------------ 样式 */
 
 	const CSS = `
@@ -1208,7 +1394,16 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-list-size{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84)}
 .dst-toggle{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
 .dst-toggle input{margin-top:2px}
-.dst-credit{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary,#8d8a84);text-align:right;letter-spacing:.02em}
+.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
+.dst-footer-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary,#f2f2f2)}
+.dst-trash{max-height:300px}
+.dst-trash-row{gap:10px}
+.dst-trash-when{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84);font-size:11px}
+.dst-trash-size{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84);font-size:11px}
+.dst-trash-row .dst-row-actions{opacity:1}
+.dst-mini.danger{color:#e2a1a1}
+.dst-mini.danger.armed{background:rgba(190,80,80,.24);border-color:rgba(220,120,120,.6)}
+.dst-mini:disabled{opacity:.45;cursor:default}.dst-credit{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary,#8d8a84);text-align:right;letter-spacing:.02em}
 .dst-done{padding:8px 10px;border-radius:8px;background:rgba(90,170,120,.16);color:#a9dcb8;font-size:12.5px}
 .dst-warn{padding:8px 10px;border-radius:8px;background:rgba(190,160,80,.16);color:#e8d29a;font-size:12.5px;line-height:1.5}
 .dst-error{padding:8px 10px;border-radius:8px;background:rgba(190,80,80,.18);color:#f0b5b5;font-size:12.5px;word-break:break-word}
@@ -1316,7 +1511,25 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.ok": "已删",
 		"batch.fail": "失败",
 		"batch.done": "完成：成功 {ok} 个，失败 {fail} 个。",
-		"credit.line": "dsh-session-tools {v} · 原创作者 Weilong",
+		"trash.open": "回收站",
+		"trash.title": "回收站",
+		"trash.hint": "删掉的东西（产物文件、会话记录、投影缓存）先放在这里，超 {days} 天自动清理。点「还原」能原路搬回去。",
+		"trash.batches": "批次",
+		"trash.filesTotal": "文件",
+		"trash.sizeTotal": "占用",
+		"trash.empty": "回收站是空的。",
+		"trash.hasRecord": "含会话记录",
+		"trash.restore": "还原",
+		"trash.reveal": "打开",
+		"trash.purge": "彻底删除",
+		"trash.purgeConfirm": "再点一次",
+		"trash.openFolder": "打开回收站文件夹",
+		"trash.refresh": "刷新",
+		"trash.recordBack": "会话记录已还原",
+		"trash.purged": "已彻底删除这一批（不可恢复）。",
+		"trash.purgeFailed": "删除失败：{msg}",
+		"trash.loadFailed": "读取回收站失败：{msg}",
+		"trash.openFailed": "打开文件夹失败：{msg}",		"credit.line": "dsh-session-tools {v} · 原创作者 Weilong",
 	};
 
 	const en = {
@@ -1402,7 +1615,25 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.ok": "deleted",
 		"batch.fail": "failed",
 		"batch.done": "Done: {ok} succeeded, {fail} failed.",
-		"credit.line": "dsh-session-tools {v} · by Weilong",
+		"trash.open": "Recycle bin",
+		"trash.title": "Recycle bin",
+		"trash.hint": "Deleted files, session records and caches wait here for {days} days. Restore puts them back where they came from.",
+		"trash.batches": "Batches",
+		"trash.filesTotal": "Files",
+		"trash.sizeTotal": "Size",
+		"trash.empty": "The recycle bin is empty.",
+		"trash.hasRecord": "includes session record",
+		"trash.restore": "Restore",
+		"trash.reveal": "Open",
+		"trash.purge": "Delete forever",
+		"trash.purgeConfirm": "Click again",
+		"trash.openFolder": "Open trash folder",
+		"trash.refresh": "Refresh",
+		"trash.recordBack": "session record restored",
+		"trash.purged": "Deleted that batch permanently.",
+		"trash.purgeFailed": "Delete failed: {msg}",
+		"trash.loadFailed": "Could not read the recycle bin: {msg}",
+		"trash.openFailed": "Could not open the folder: {msg}",		"credit.line": "dsh-session-tools {v} · by Weilong",
 	};
 
 	/* ------------------------------------------------------------------ 入口 */
@@ -1432,7 +1663,16 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			name: "shell.overlay",
 			id: "dsh-session-tools.dialog",
 			order: 60,
-		}, () => h(react.Fragment, null, h(StyleTag), h(DeleteSessionDialog), h(BatchDeleteDialog))));
+		}, () => h(react.Fragment, null, h(StyleTag), h(DeleteSessionDialog), h(BatchDeleteDialog), h(TrashDialog))));
+
+		// 侧栏页脚常驻入口：回收站随时能看、能还原，不用等删完那一刻
+		ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
+			name: "sidebar.footer.action",
+			id: "dsh-session-tools.trash",
+			order: 50,
+			locale: NS,
+			inject: () => ({ t }),
+		}, TrashActionButton));
 
 		try {
 			if (typeof ctx.inject === "function") {

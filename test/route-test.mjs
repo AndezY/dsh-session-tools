@@ -110,6 +110,18 @@ const openBad = await call({ op: 'open', sessionId, path: 'C:/Windows/system32/c
 assert.equal(openBad.data.ok, false)
 assert.equal(openBad.data.error, 'not an artifact of this session')
 console.log('open ok: 越界路径被拒')
+// trash：列出批次（带体积 / 是否含会话记录），非法 token 一律拒绝
+const trashList = await call({ op: 'trash' })
+assert.equal(trashList.data.ok, true)
+assert.ok(Array.isArray(trashList.data.entries), 'entries array')
+assert.ok(typeof trashList.data.root === 'string' && trashList.data.root !== '', 'root reported')
+assert.ok(trashList.data.totals && typeof trashList.data.totals.bytes === 'number', 'totals reported')
+
+const purgeBad = await call({ op: 'purgeEntry', token: '../etc' })
+assert.equal(purgeBad.data.ok, false)
+const openBad2 = await call({ op: 'openTrash', token: '../etc' })
+assert.equal(openBad2.data.ok, false)
+console.log('trash ops ok: 列表带 totals，越界 token 被拒')
 // 未知 op
 const bogus = await call({ op: 'nope' })
 assert.equal(bogus.data.ok, false)

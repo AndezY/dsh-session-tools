@@ -64,6 +64,21 @@ const fetchStub = async (url, init) => {
   if (body && body.op === 'ping') {
     return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, version: '0.5.0', caps: { keep: true, preview: true, open: true, trash: true, export: true, batch: true, lock: true } }) }
   }
+  if (body && body.op === 'trash') {
+    return {
+      ok: true, status: 200, text: async () => JSON.stringify({
+        ok: true, root: 'C:/u/.dsh/trash',
+        entries: [
+          { token: '20260101-000000-session-x', createdAt: '2026-01-01T09:30:00.000Z', sessionId: 'session-x', title: '演示会话', files: 2, bytes: 2048, hasRecord: true },
+          { token: '20251231-120000-session-y', createdAt: '2025-12-31T12:00:00.000Z', sessionId: 'session-y', title: '', files: 1, bytes: 512, hasRecord: false },
+        ],
+        totals: { batches: 2, files: 3, bytes: 2560 },
+      }),
+    }
+  }
+  if (body && body.op === 'purgeEntry') {
+    return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, token: body.token, bytes: 512 }) }
+  }
   if (body && body.op === 'restore') {
     return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, restored: ['E:/ws/report.md'], conflicts: [], failed: [] }) }
   }
@@ -135,6 +150,8 @@ assert.equal(byId['dsh-session-tools.delete'].meta.name, 'sidebar.workspaces.ses
 assert.equal(byId['dsh-session-tools.delete'].meta.order, 500)
 assert.ok(byId['dsh-session-tools.dialog'], 'dialog registered')
 assert.equal(byId['dsh-session-tools.dialog'].meta.name, 'shell.overlay')
+assert.ok(byId['dsh-session-tools.trash'], 'recycle bin footer entry registered')
+assert.equal(byId['dsh-session-tools.trash'].meta.name, 'sidebar.footer.action')
 console.log('slots ok:', registrations.map((r) => r.meta.name + '#' + r.meta.id).join(', '))
 
 /** overlay 注册项 → 里层真实的 DeleteSessionDialog 元素。 */
@@ -591,6 +608,61 @@ assert.ok(textTrash.includes('回收站'), 'trash option rendered')
   assert.ok(batchText.includes('批量删除会话'), 'batch title')
   assert.ok(batchText.includes('会话一') && batchText.includes('会话二'), 'candidates listed')
   console.log('batch ok: 菜单项 + 候选列表')
+}
+
+// ---- 回收站面板：列表、还原、彻底删除
+{
+  const entries = [
+    { token: '20260101-000000-session-x', createdAt: '2026-01-01T09:30:00.000Z', sessionId: 'session-x', title: '演示会话', files: 2, bytes: 2048, hasRecord: true },
+    { token: '20251231-120000-session-y', createdAt: '2025-12-31T12:00:00.000Z', sessionId: 'session-y', title: '', files: 1, bytes: 512, hasRecord: false },
+  ]
+  const totals = { batches: 2, files: 3, bytes: 2560 }
+
+  const mountTrash = (states) => {
+    resetHooks(states)
+    const overlay = byId['dsh-session-tools.dialog'].component({})
+    const kids = overlay.type === react.Fragment ? overlay.children : [overlay]
+    return kids.find((child) => child && child.type && child.type.name === 'TrashDialog')
+  }
+  const walk = (node, out) => {
+    if (!node) return out
+    if (Array.isArray(node)) { for (const kid of node) walk(kid, out); return out }
+    if (typeof node !== 'object') return out
+    if (node.props) out.push(node)
+    if (node.children) walk(node.children, out)
+    return out
+  }
+
+  const el = mountTrash([{ open: true }, entries, 'C:/u/.dsh/trash', totals, '', '', ''])
+  const tree = el.type(el.props)
+  const text = JSON.stringify(tree)
+  assert.ok(text.includes('回收站'), 'trash dialog title')
+  assert.ok(text.includes('演示会话'), 'batch title listed')
+  assert.ok(text.includes('含会话记录'), 'record marker shown for a batch that holds the session log')
+  assert.ok(text.includes('2.0 KB') || text.includes('2 KB') || text.includes('2048'), 'batch size shown')
+  assert.ok(text.includes('还原') && text.includes('彻底删除'), 'row actions present')
+
+  const buttons = walk(tree, []).filter((n) => n.type === 'button')
+  const restoreBtn = buttons.find((b) => JSON.stringify(b.children || []).includes('还原'))
+  assert.ok(restoreBtn, 'restore button found')
+  restoreBtn.props.onClick()
+  await new Promise((resolve) => setImmediate(resolve))
+  const restoreCall = fetchCalls.filter((c) => c.body && c.body.op === 'restore').pop()
+  assert.ok(restoreCall, 'restore op issued')
+  assert.equal(restoreCall.body.token, '20260101-000000-session-x')
+
+  // 第一次点「彻底删除」只是把按钮变成「再点一次」；再点才真的删
+  const armedEl = mountTrash([{ open: true }, entries, 'C:/u/.dsh/trash', totals, '', '', '20251231-120000-session-y'])
+  const armedTree = armedEl.type(armedEl.props)
+  assert.ok(JSON.stringify(armedTree).includes('再点一次'), 'armed state renders the confirm label')
+  const purgeBtn = walk(armedTree, []).filter((n) => n.type === 'button')
+    .find((b) => JSON.stringify(b.children || []).includes('再点一次'))
+  purgeBtn.props.onClick()
+  await new Promise((resolve) => setImmediate(resolve))
+  const purgeCall = fetchCalls.filter((c) => c.body && c.body.op === 'purgeEntry').pop()
+  assert.ok(purgeCall, 'purgeEntry op issued after the second click')
+  assert.equal(purgeCall.body.token, '20251231-120000-session-y')
+  console.log('trash pane ok: 列表 / 含会话记录标记 / 还原 / 彻底删除需二次确认')
 }
 
 // ---- 词典齐备

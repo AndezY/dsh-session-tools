@@ -177,6 +177,13 @@ assert.ok(fs.existsSync(path.join(trashed.artifacts.trashDir, 'manifest.json')),
 assert.deepEqual(core.listTrash().map((r) => r.token).includes(trashed.artifacts.trashToken), true, 'listed in trash')
 console.log('trash ok:', JSON.stringify({ token: trashed.artifacts.trashToken, bytes: trashed.artifacts.trashedBytes }))
 
+// listTrash 现在带体积和"是否含会话记录"
+const listed = core.listTrash()
+const listedRow = listed.find((row) => row.token === trashed.artifacts.trashToken)
+assert.ok(listedRow, 'batch listed')
+assert.ok(listedRow.bytes > 0, 'batch size measured')
+assert.equal(listedRow.hasRecord, true, 'session record flag reported')
+
 const undo = core.restoreTrash(trashed.artifacts.trashToken)
 assert.equal(undo.ok, true, JSON.stringify(undo.failed))
 assert.deepEqual(undo.restored, [trashedFile], 'restored to the original path')
@@ -193,6 +200,22 @@ const trash2 = core.deleteSession({
 })
 assert.equal(trash2.ok, true, 'empty deletion still fine')
 console.log('trash-empty ok')
+
+// purgeTrashEntry：彻底删掉一批（先造一个真有日志目录的会话）
+const purgeSessionId = 'session-test-purge-2468-1357-999999999999'
+const purgeDir = path.join(tmpHome, 'sessions', group, purgeSessionId)
+fs.mkdirSync(purgeDir, { recursive: true })
+fs.writeFileSync(
+  path.join(purgeDir, 'session.v4.jsonl.zstd'),
+  zlib.zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: purgeSessionId, cwd: wsDir }) + '\n')),
+)
+const purgeTarget = core.deleteSession({ sessionId: purgeSessionId, deleteArtifacts: false, trash: true })
+assert.ok(purgeTarget.logs.trashToken, 'purge target has a token')
+const purgedOne = core.purgeTrashEntry(purgeTarget.logs.trashToken)
+assert.equal(purgedOne.ok, true, JSON.stringify(purgedOne))
+assert.ok(!fs.existsSync(purgeTarget.logs.trashDir), 'batch directory removed')
+assert.equal(core.purgeTrashEntry('../etc').ok, false, 'bad token refused')
+console.log('purgeEntry ok:', JSON.stringify({ bytes: purgedOne.bytes }))
 
 // purge：保留期 0 天 → 立刻清空
 const purged = core.purgeTrash(0)

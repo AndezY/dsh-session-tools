@@ -1,4 +1,4 @@
-dsh-session-tools 0.5.4 —— 给 DeepSeek Harness 的「会话删除」插件
+dsh-session-tools 0.5.5 —— 给 DeepSeek Harness 的「会话删除」插件
 原创作者：Weilong　·　免费开源（MIT）：保留署名即可自由使用、修改、再分发
 ==========================================================
 
@@ -45,7 +45,7 @@ A: 这是没有代码签名的脚本，点「更多信息」→「仍要运行�
 
 Q: 杀软报毒？
 A: 安装器要写 .dsh 目录并调用自带的 pnpm，行为上和装包工具一样，可能被启发式拦。
-   放行即可；不放心就用 zip 里的 dsh-session-tools-0.5.4.zip 手动装：
+   放行即可；不放心就用 zip 里的 dsh-session-tools-0.5.5.zip 手动装：
    解压出 dsh-session-tools 目录 → 放到 %USERPROFILE%\.dsh\plugins\
    → 再双击安装器（它只认这一步的复制）。
 

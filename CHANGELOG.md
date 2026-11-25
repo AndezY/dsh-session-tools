@@ -2,6 +2,14 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.5.5
+
+- **回收站有了界面**：侧栏页脚常驻「回收站」按钮，列出每个批次的时间、会话标题、体积、
+  是否含会话记录；每行可「还原」「打开文件夹」「彻底删除」（二次确认）。
+- 新增 host ops：`trash` 返回 `root` / `entries` / `totals`（含字节数、`hasRecord`、`hasCache`）、
+  `purgeEntry` 彻底删除单批、`openTrash` 在文件管理器里打开回收站。
+- `listTrash()` 现在会量出每批占用字节并标出是否包含会话记录。
+
 ## 0.5.4
 
 - 仓库化：补齐 `repository` / `bugs` / `homepage` 元数据、`CHANGELOG.md` 与 `.gitignore`，
