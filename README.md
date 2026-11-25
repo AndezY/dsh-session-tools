@@ -23,7 +23,7 @@ dsh plugin add github:AndezY/dsh-session-tools
 
 **② 一键安装器（Windows）**
 
-下载 Release 里的 `dsh-session-tools-0.5.4-windows-installer.cmd` → 完全退出 DSH（托盘右键退出）→ 双击 →
+下载最新 Release 里的 `dsh-session-tools-*-windows-installer.cmd` → 完全退出 DSH（托盘右键退出）→ 双击 →
 按 `1` → 重新打开。安装器会自己找 `DSH_HOME`、改 `package.json`、跑 pnpm，
 并且带备份、带 `--status` / `--uninstall`。
 
