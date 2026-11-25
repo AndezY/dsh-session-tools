@@ -36,9 +36,23 @@ fs.writeFileSync(
 
 const plugin = await import('../lib/index.js')
 
+// 会话"活在宿主里"的假象：sessions.get(id) 一直返回对象，模拟主面板/文档页占着它
+const liveSessions = new Map()
+const fakeAgent = {
+  status: 'running',
+  cancelled: 0,
+  disposed: 0,
+  cancel() { this.cancelled += 1 },
+  dispose() { this.disposed += 1 },
+}
+const fakeSessions = {
+  get: (id) => liveSessions.get(id),
+  detach: (id) => { liveSessions.delete(id) },
+}
 let captured = null
 const ctx = {
   effect: (fn) => fn(),
+  get: (name) => (name === 'sessions' ? fakeSessions : name === 'agents' ? { get: () => fakeAgent } : undefined),
   webServer: {
     register: (spec, label) => {
       captured = { spec, label }
@@ -122,6 +136,27 @@ assert.equal(purgeBad.data.ok, false)
 const openBad2 = await call({ op: 'openTrash', token: '../etc' })
 assert.equal(openBad2.data.ok, false)
 console.log('trash ops ok: 列表带 totals，越界 token 被拒')
+// force：会话还挂在宿主里 → 普通删除报 still-live，强制删除照删不误
+const forceSessionId = 'session-route-force-1111-2222-333333333333'
+const forceDir = path.join(tmpHome, 'sessions', '--tmp--', forceSessionId)
+fs.mkdirSync(forceDir, { recursive: true })
+fs.writeFileSync(
+  path.join(forceDir, 'session.v4.jsonl.zstd'),
+  zlib.zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: forceSessionId, cwd: wsDir }) + '\n', 'utf8')),
+)
+liveSessions.set(forceSessionId, { id: forceSessionId })
+const stillLive = await call({ op: 'delete', sessionId: forceSessionId, deleteArtifacts: false })
+assert.equal(stillLive.data.ok, false, 'plain delete refuses a live session')
+assert.equal(stillLive.data.code, 'still-live', 'still-live is reported to the client')
+assert.ok(fs.existsSync(forceDir), 'files untouched when the session is still live')
+
+const forced = await call({ op: 'delete', sessionId: forceSessionId, deleteArtifacts: false, force: true, trash: true })
+assert.equal(forced.data.ok, true, JSON.stringify(forced.data))
+assert.equal(forced.data.forced, true, 'forced flag reported')
+assert.ok(forced.data.stop && forced.data.stop.cancelled === true, 'running turn cancelled first')
+assert.ok(forced.data.hardStop && Array.isArray(forced.data.hardStop.attempts), 'hard stop attempts recorded')
+assert.ok(!fs.existsSync(forceDir), 'session directory gone despite being live')
+console.log('force delete ok: still-live 被拦、force 照删、硬拆有记录')
 // 未知 op
 const bogus = await call({ op: 'nope' })
 assert.equal(bogus.data.ok, false)

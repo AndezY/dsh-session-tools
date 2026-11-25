@@ -610,6 +610,56 @@ assert.ok(textTrash.includes('回收站'), 'trash option rendered')
   console.log('batch ok: 菜单项 + 候选列表')
 }
 
+// ---- 强制结束并删除：宿主回 still-live 时给入口，点了带 force 重发
+{
+  const openDialog = (states) => {
+    resetHooks(states)
+    const overlay = byId['dsh-session-tools.dialog'].component({})
+    const kids = overlay.type === react.Fragment ? overlay.children : [overlay]
+    return kids.find((child) => child && child.type && child.type.name === 'DeleteSessionDialog')
+  }
+  const walk2 = (node, out) => {
+    if (!node) return out
+    if (Array.isArray(node)) { for (const kid of node) walk2(kid, out); return out }
+    if (typeof node !== 'object') return out
+    if (node.props) out.push(node)
+    if (node.children) walk2(node.children, out)
+    return out
+  }
+  const btnText = (node) => JSON.stringify(node.children || [])
+
+  // forceAvail 是最后一个 hook：先在 seq 末尾塞 true
+  const seqForce = [
+    { sessionId: 'session-x' }, PLAN, '', false, false, {}, null, '', false, null, null,
+    { keepMode: 'stay', trash: true, grouped: true }, {}, { pinned: false, zoom: 1 },
+    { text: '', busy: false }, true,
+  ]
+  const el = openDialog(seqForce)
+  const tree = el.type(el.props)
+  const buttons = walk2(tree, []).filter((n) => n.type === 'button')
+  const forceBtn = buttons.find((b) => btnText(b).includes('强制结束并删除'))
+  assert.ok(forceBtn, 'force button appears when the host reported still-live')
+
+  forceBtn.props.onClick()
+  await new Promise((resolve) => setImmediate(resolve))
+  const call = fetchCalls.filter((c) => c.body && c.body.op === 'delete').pop()
+  assert.ok(call, 'delete op issued')
+  assert.equal(call.body.force, true, 'force flag sent')
+  assert.equal(call.body.waitForRelease, false, 'force path does not wait for release')
+
+  // 默认（宿主没报 still-live）不该出现这个按钮
+  const offSeq = [
+    { sessionId: 'session-x' }, PLAN, '', false, false, {}, null, '', false, null, null,
+    { keepMode: 'stay', trash: true, grouped: true }, {}, { pinned: false, zoom: 1 },
+    { text: '', busy: false }, false,
+  ]
+  const el2 = openDialog(offSeq)
+  const tree2 = el2.type(el2.props)
+  const hasForce = walk2(tree2, []).filter((n) => n.type === 'button').some((b) => btnText(b).includes('强制结束并删除'))
+  assert.equal(hasForce, false, 'force button hidden in the normal path')
+  console.log('force ok: still-live 时才出现，点击带 force:true 且不等释放')
+}
+
 // ---- 回收站面板：列表、还原、彻底删除
 {
   const entries = [

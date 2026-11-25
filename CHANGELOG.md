@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.5.6
+
+- **强制结束并删除**：会话还挂在宿主里（主面板 / 右侧文档页占着）时，普通删除会回 `still-live`，
+  对话框这时候多出一个「强制结束并删除」按钮——先取消正在跑的回合，再硬拆宿主里的会话对象
+  （`agent.dispose` / `agent.cancel` / `controller.close` / `sessions.detach` 逐层尝试，
+  每次尝试都记进 `hardStop.attempts`），然后删文件。
+- host 侧 `delete` 新增 `force: true`；结果里多 `forced` 与 `hardStop`。
+- 副作用（预期）：如果它还开在别的面板里，那个面板会读取失败；残留宿主对象由启动时 sweep 收拾。
+
 ## 0.5.5
 
 - **回收站有了界面**：侧栏页脚常驻「回收站」按钮，列出每个批次的时间、会话标题、体积、

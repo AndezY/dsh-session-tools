@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.5";
+	const VERSION = "0.5.6";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -419,6 +419,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		const [collapsed, setCollapsed] = useState({});
 		const [viewer, setViewer] = useState({ pinned: false, zoom: 1 });
 		const [notice, setNotice] = useState({ text: "", busy: false });
+		// 放在最后：宿主回 still-live 时才置真，用来显示「强制结束并删除」
+		const [forceAvail, setForceAvail] = useState(false);
 
 		const sessionId = req ? req.sessionId : null;
 
@@ -559,10 +561,12 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			}
 		};
 
-		const confirm = async () => {
+		const confirm = async (force) => {
 			if (busy) return;
+			const forced = force === true;
 			setBusy(true);
 			setError("");
+			if (forced) setForceAvail(false);
 			// 删的就是当前打开的这个会话时：先把主面板让出来，宿主的活对象才会退场，
 			// 否则文件被删掉而宿主还攥着它，下一个回合就会写日志失败（ENOENT）。
 			const wasCurrent = currentSessionId() === sessionId;
@@ -578,7 +582,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					keep: supportsKeep ? keptFiles.map((item) => item.path) : [],
 					keepMode: supportsExport && opts.keepMode === "export" ? "export" : "stay",
 					trash: supportsTrash && opts.trash === true,
-					waitForRelease: wasCurrent === true,
+					waitForRelease: wasCurrent === true && !forced,
+					force: forced,
 				}, 120000);
 				setDone(result);
 				await evictSessionRow(sessionId);
@@ -591,6 +596,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					try { uiWorkspace.openSession(sessionId); } catch { /* ignore */ }
 				}
 				setError(String(err && err.message ? err.message : err));
+				// 宿主说“这个会话还开着”：给一个强制入口，不强求用户先去切换
+				setForceAvail(!forced && Boolean(err && err.code === "still-live"));
 				setBusy(false);
 			}
 		};
@@ -819,6 +826,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					t("done.trash").replace("{n}", String(trashedCount)).replace("{dir}", (done.artifacts && done.artifacts.trashDir) || (done.logs && done.logs.trashDir) || "")));
 			}
 
+			if (done.forced) {
+				body.push(h("div", { key: "forced", className: "dst-hint" }, t("done.forced")));
+			}
+
 			if (exportDir) {
 				body.push(h("div", { key: "exportinfo", className: "dst-hint" },
 					t("done.export").replace("{dir}", exportDir)));
@@ -860,6 +871,12 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			ops.push(h("button", { key: "close", type: "button", className: "dst-btn primary", onClick: () => setPending(null) }, t("dialog.close")));
 		} else {
 			ops.push(h("button", { key: "cancel", type: "button", className: "dst-btn", onClick: close, disabled: busy }, t("dialog.cancel")));
+			// 宿主说“会话还开着”时才出现：不逼用户先去切标签，直接硬停再删
+			if (forceAvail) {
+				ops.push(h("button", {
+					key: "force", type: "button", className: "dst-btn danger", onClick: () => confirm(true), disabled: busy,
+				}, busy ? t("dialog.deleting") : t("dialog.force")));
+			}
 			ops.push(h("button", {
 				key: "ok", type: "button", className: "dst-btn danger", onClick: confirm,
 				disabled: busy || loading || !plan,
@@ -1511,7 +1528,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.ok": "已删",
 		"batch.fail": "失败",
 		"batch.done": "完成：成功 {ok} 个，失败 {fail} 个。",
-		"trash.open": "回收站",
+		"dialog.force": "强制结束并删除",
+		"dialog.forceHint": "先取消正在跑的回合，再硬拆宿主里的会话对象，然后删文件。若它还开在别的面板里，那个面板会报读取失败——这属于预期。",
+		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"trash.open": "回收站",
 		"trash.title": "回收站",
 		"trash.hint": "删掉的东西（产物文件、会话记录、投影缓存）先放在这里，超 {days} 天自动清理。点「还原」能原路搬回去。",
 		"trash.batches": "批次",
@@ -1615,7 +1634,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.ok": "deleted",
 		"batch.fail": "failed",
 		"batch.done": "Done: {ok} succeeded, {fail} failed.",
-		"trash.open": "Recycle bin",
+		"dialog.force": "Force delete",
+		"dialog.forceHint": "Cancels the running turn, tears the live session out of the host, then deletes the files. Any other panel still showing it will fail to read — that is expected.",
+		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"trash.open": "Recycle bin",
 		"trash.title": "Recycle bin",
 		"trash.hint": "Deleted files, session records and caches wait here for {days} days. Restore puts them back where they came from.",
 		"trash.batches": "Batches",
