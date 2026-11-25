@@ -7,6 +7,9 @@ dist/*.exe
 *.bak-*
 package.json.bak-*
 
+# release/ 下是发版镜像（安装包体积很小，直接进库，保证下载链接永远可用）
+!release/**
+
 # 依赖与系统杂物
 node_modules/
 .DS_Store

@@ -24,13 +24,25 @@ dsh plugin add github:AndezY/dsh-session-tools
 
 装完重启 DeepSeek Harness。
 
-**② 一键安装器（Windows）**
+**② 直接下载安装包（仓库内镜像，链接不会失效）**
+
+| 文件 | 直链 |
+|---|---|
+| Windows 安装器 | [`release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd`](release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd) |
+| macOS 安装包 | [`release/0.5.5/dsh-session-tools-0.5.5-mac.zip`](release/0.5.5/dsh-session-tools-0.5.5-mac.zip) · [`.tar.gz` 备用](release/0.5.5/dsh-session-tools-0.5.5-mac.tar.gz) |
+
+命令行取：
+```bash
+curl -L -o install.cmd https://github.com/AndezY/dsh-session-tools/raw/main/release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd
+```
+
+**③ 一键安装器怎么用（Windows）**
 
 下载最新 Release 里的 `dsh-session-tools-*-windows-installer.cmd` → 完全退出 DSH（托盘右键退出）→ 双击 →
 按 `1` → 重新打开。安装器会自己找 `DSH_HOME`、改 `package.json`、跑 pnpm，
 并且带备份、带 `--status` / `--uninstall`。
 
-**③ 手动装**
+**④ 手动装**
 
 ```bash
 git clone https://github.com/AndezY/dsh-session-tools ~/.dsh/plugins/dsh-session-tools
