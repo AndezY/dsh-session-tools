@@ -24,16 +24,26 @@ dsh plugin add github:AndezY/dsh-session-tools
 
 装完重启 DeepSeek Harness。
 
-**② 直接下载安装包（仓库内镜像，链接不会失效）**
+**② 直接下载安装包（仓库内镜像，链接永久有效）**
 
-| 文件 | 直链 |
+文件名固定、不带版本号——每次发版只覆盖同名文件，下面的链接永远不用改。
+当前版本与 sha256 记在 [`release/VERSION.json`](release/VERSION.json)。
+
+| 平台 | 下载 |
 |---|---|
-| Windows 安装器 | [`release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd`](release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd) |
-| macOS 安装包 | [`release/0.5.5/dsh-session-tools-0.5.5-mac.zip`](release/0.5.5/dsh-session-tools-0.5.5-mac.zip) · [`.tar.gz` 备用](release/0.5.5/dsh-session-tools-0.5.5-mac.tar.gz) |
+| Windows | [`installer-windows.cmd`](release/installer-windows.cmd) |
+| macOS | [`installer-mac.zip`](release/installer-mac.zip) · 备用 [`installer-mac.tar.gz`](release/installer-mac.tar.gz) |
 
 命令行取：
+
 ```bash
-curl -L -o install.cmd https://github.com/AndezY/dsh-session-tools/raw/main/release/0.5.5/dsh-session-tools-0.5.5-windows-installer.cmd
+curl -L -o install.cmd https://github.com/AndezY/dsh-session-tools/raw/main/release/installer-windows.cmd
+```
+
+想核对下载到的文件，看 [`release/VERSION.json`](release/VERSION.json) 里的 `sha256`：
+
+```powershell
+Get-FileHash .\install.cmd -Algorithm SHA256
 ```
 
 **③ 一键安装器怎么用（Windows）**

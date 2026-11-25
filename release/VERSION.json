@@ -1,0 +1,18 @@
+{
+    "version":  "0.5.5",
+    "builtAt":  "2026-11-25T16:14:04Z",
+    "files":  {
+                  "installer-windows.cmd":  {
+                                                "bytes":  105051,
+                                                "sha256":  "c6db4145484c022b56b2c5fca0e23445c29969c97d178ee4f14777900e3ecf36"
+                                            },
+                  "installer-mac.zip":  {
+                                            "bytes":  60069,
+                                            "sha256":  "bf064556ef8a27602176b179af69ff00c2e741ca2710f3a1d561dcacddbcd379"
+                                        },
+                  "installer-mac.tar.gz":  {
+                                               "bytes":  54531,
+                                               "sha256":  "f125154757af4b91fc1ab32840d7e6e7220fa07e4c57192a91c055075cd7e126"
+                                           }
+              }
+}

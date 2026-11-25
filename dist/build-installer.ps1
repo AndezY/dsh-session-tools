@@ -162,5 +162,62 @@ Say '  （macOS 解压后如果 .command 丢了执行位：chmod +x install-mac.
 
 try { Remove-Item -LiteralPath $stage -Recurse -Force } catch { }
 
+# ---------------------------------------------------------------- 7. 同步到 release/ 镜像
+# 文件名固定、不带版本号：以后发版只覆盖同名文件，README / 商品页的下载链接永远不用改。
+
+Step '同步到 release/ 镜像（固定文件名）'
+$relDir = Join-Path $pluginRoot 'release'
+New-Item -ItemType Directory -Path $relDir -Force | Out-Null
+
+$mirrorCmd = Join-Path $relDir 'installer-windows.cmd'
+$mirrorMac = Join-Path $relDir 'installer-mac.zip'
+$mirrorTar = Join-Path $relDir 'installer-mac.tar.gz'
+
+Copy-Item -LiteralPath $cmdPath -Destination $mirrorCmd -Force
+Copy-Item -LiteralPath $macZip -Destination $mirrorMac -Force
+Say ('  installer-windows.cmd  ' + [math]::Round((Get-Item $mirrorCmd).Length / 1KB, 1) + ' KB')
+Say ('  installer-mac.zip      ' + [math]::Round((Get-Item $mirrorMac).Length / 1KB, 1) + ' KB')
+
+# tar.gz 备用：GitHub 的附件处理器偶尔吃不下 zip，tar 走另一条通道
+$tarStage = Join-Path ([IO.Path]::GetTempPath()) ('dsst-tar-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tarStage -Force | Out-Null
+try {
+  Expand-Archive -LiteralPath $macZip -DestinationPath $tarStage -Force
+  if (Test-Path -LiteralPath $mirrorTar) { Remove-Item -LiteralPath $mirrorTar -Force }
+  Push-Location $tarStage
+  try {
+    & tar -czf $mirrorTar . 2>&1 | Out-Null
+  } finally {
+    Pop-Location
+  }
+  if (Test-Path -LiteralPath $mirrorTar) {
+    Say ('  installer-mac.tar.gz   ' + [math]::Round((Get-Item $mirrorTar).Length / 1KB, 1) + ' KB')
+  } else {
+    Say '  （tar 不可用，跳过 tar.gz）'
+  }
+} finally {
+  try { Remove-Item -LiteralPath $tarStage -Recurse -Force } catch { }
+}
+
+# 版本清单：谁下到的是哪一版、字节数、sha256 都写在这里
+$manifest = [ordered]@{
+  version   = $version
+  builtAt   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+  files     = [ordered]@{}
+}
+foreach ($name in @('installer-windows.cmd', 'installer-mac.zip', 'installer-mac.tar.gz')) {
+  $path = Join-Path $relDir $name
+  if (-not (Test-Path -LiteralPath $path)) { continue }
+  $manifest.files[$name] = [ordered]@{
+    bytes  = (Get-Item $path).Length
+    sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower()
+  }
+}
+$manifestPath = Join-Path $relDir 'VERSION.json'
+[IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 5) + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+Say ('  VERSION.json -> ' + $version)
+
 Step '完成'
 Say ('  输出目录：' + $OutDir)
+Say ('  release 镜像：' + $relDir)
+Say '  下次发版同样跑这个脚本即可，文件名不变，下载链接不用动。'
