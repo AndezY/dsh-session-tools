@@ -116,7 +116,7 @@ def render(path, W, H):
     logo_mark(d, pad, 88, 58)
     text(d, (pad + 76, 92), "dsh-session-tools", font(27, True), INK)
     text(d, (pad + 76, 128), "DeepSeek Harness 的会话删除插件", font(20), (176, 183, 196))
-    badge = "v0.5.0"
+    badge = "v0.5.5"
     fb = font(17, True)
     bw = d.textlength(badge, font=fb) / S + 34
     rrect(d, box(W - pad - bw, 96, W - pad, 134), 19, outline=LINE, width=1.4)
@@ -220,9 +220,10 @@ def render(path, W, H):
     # ------------------------------------------------------------ 痛点 → 结果
     py = 1210
     col_w = (W - pad * 2) / 3
-    pain_row(d, pad, py, col_w, "删不干净", "删完即从侧栏消失，不留灰色空壳")
-    pain_row(d, pad + col_w, py, col_w, "怕删错", "先进回收站，七天内原路还原")
-    pain_row(d, pad + col_w * 2, py, col_w, "不知道删了啥", "悬停预览 + 逐条勾选")
+    # 这里说的是 DSH 原生的缺口，不是插件自己的历史 bug
+    pain_row(d, pad, py, col_w, "只有归档", "会话藏起来，磁盘一点没省")
+    pain_row(d, pad + col_w, py, col_w, "产物无主", "不知道哪些文件是它生成的")
+    pain_row(d, pad + col_w * 2, py, col_w, "删除无门", "只能手动去 ~/.dsh 动目录")
     d.line([(px(pad + col_w - 40), px(py - 4)), (px(pad + col_w - 40), px(py + 62))], fill=(34, 38, 47), width=px(1.2))
     d.line([(px(pad + col_w * 2 - 40), px(py - 4)), (px(pad + col_w * 2 - 40), px(py + 62))],
            fill=(34, 38, 47), width=px(1.2))

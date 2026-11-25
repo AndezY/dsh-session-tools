@@ -144,7 +144,7 @@ def render(path, W, H, title_size, cols, hero_h, rows_gap, feature_h, subtitle):
 
     # ---------------------------------------------------------------- 功能网格
     features = [
-        ("真删除", "删完从侧栏消失\n不留灰色归档空壳", ACCENT),
+        ("真删除", "记录 / 缓存 / 账目\n一起清掉", ACCENT),
         ("逐条保留", "产物全列出来\n勾哪个留哪个", GREEN),
         ("悬停预览", "图片 / 代码 / Markdown\n就地看得见", ACCENT),
         ("打开 · 定位", "默认程序打开\n资源管理器定位", MUTED),
