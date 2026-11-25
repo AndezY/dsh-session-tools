@@ -9,6 +9,8 @@
 - 新增 host ops：`trash` 返回 `root` / `entries` / `totals`（含字节数、`hasRecord`、`hasCache`）、
   `purgeEntry` 彻底删除单批、`openTrash` 在文件管理器里打开回收站。
 - `listTrash()` 现在会量出每批占用字节并标出是否包含会话记录。
+- 安装包改为在 `release/` 下以固定文件名镜像（`installer-windows.cmd` / `installer-mac.*`），
+  发版只覆盖内容、链接永不变；附 `VERSION.json` 记录版本与 sha256。
 
 ## 0.5.4
 

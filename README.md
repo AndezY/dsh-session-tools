@@ -286,3 +286,25 @@ powershell -ExecutionPolicy Bypass -File dist\build-installer.ps1
 `package.json` 加依赖和 bundles 条目（先备份成 `.bak-<时间戳>`）、用 DSH 自带的 node/pnpm 落
 `node_modules`（找不到 pnpm 就直接复制——这个插件零外部依赖，复制即可用）。它会先检查 DSH
 是否还开着，开着就等你退出再继续。
+
+顺手还会**同步一份到 [`release/`](release)**，文件名固定：
+
+| 产物 | 说明 |
+|---|---|
+| `release/installer-windows.cmd` | 就是上面那个单文件安装器 |
+| `release/installer-mac.zip` | macOS 包（`install-mac.command` + 插件本体） |
+| `release/installer-mac.tar.gz` | 同一份内容，GitHub 附件偶尔吃不下 zip 时用它 |
+| `release/VERSION.json` | 当前版本、构建时间、每个文件的字节数与 sha256 |
+
+## 发版流程
+
+1. 改三处版本号：`package.json` 的 `version`、`client.js` 的 `VERSION`、`lib/index.js` 里两处 `version`
+2. `powershell -ExecutionPolicy Bypass -File dist\build-installer.ps1`
+   —— 重打 Windows 单文件安装器 + mac 包，**并覆盖 `release/` 的固定文件名、重写 `VERSION.json`**
+3. 跑一遍自测：`node test/*.mjs`（5 套，全绿再发）
+4. `git add -A && git commit && git tag -a vX.Y.Z -m "..." && git push origin main --tags`
+5. 想要 Release 页面有附件就把 `release/` 里的文件拖上去（可选；README 的下载链接指向仓库内镜像，
+   不依赖 Release 附件）
+
+**为什么链接不用改**：`release/` 里永远是 `installer-windows.cmd` 这几个名字，发版只是覆盖内容，
+所以 README、商品页、小红书文案里的下载地址可以一直用。
