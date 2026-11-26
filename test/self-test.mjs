@@ -218,8 +218,9 @@ console.log('trash-empty ok')
 
   const two = core.restoreTrash(token)
   assert.equal(two.ok, true, 'second restore must not be a failure: ' + JSON.stringify(two.error || ''))
-  assert.equal(two.recordRestored, true, 'second restore reports already-restored')
+  assert.ok(two.recordRestored === true || two.alreadyGone === true, 'second restore reports already-restored')
   assert.equal(two.failed.length, 0, 'no failure entries on the second try')
+  assert.equal(core.listTrash().some((row) => row.token === token), false, 'batch shell cleaned out of the trash list')
   assert.ok(fs.existsSync(dir), 'session directory is back')
   console.log('restore twice ok: 第二次数幂等，不再报失败')
 }

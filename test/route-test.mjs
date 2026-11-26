@@ -178,7 +178,7 @@ console.log('caps ok: purge / force 都对外声明，界面才能按能力放�
   ])
   assert.equal(a.data.ok, true, 'first ok: ' + JSON.stringify(a.data.error || ''))
   assert.equal(b.data.ok, true, 'second ok: ' + JSON.stringify(b.data.error || ''))
-  assert.ok(b.data.deduped === true || b.data.recordRestored === true, 'second call deduped or already-restored')
+  assert.ok(b.data.deduped === true || b.data.recordRestored === true || b.data.alreadyGone === true, 'second call deduped or already-restored')
   assert.ok(fs.existsSync(dir), 'record is back on disk')
 
   // 再来一次（顺序调用）：还是成功

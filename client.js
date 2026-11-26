@@ -554,7 +554,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				const result = await apiBody({ op: "restore", token }, 60000);
 				const count = (result.restored || []).length;
 				const rows = [
-					count > 0 ? t("undo.done").replace("{n}", String(count)) : t("undo.already"),
+					(count > 0 && !result.alreadyGone) ? t("undo.done").replace("{n}", String(count)) : t("undo.already"),
 					result.recordRestored ? t("trash.recordBack") : "",
 					(result.conflicts && result.conflicts.length > 0) ? t("undo.conflicts").replace("{n}", String(result.conflicts.length)) : "",
 					(result.failed && result.failed.length > 0) ? t("undo.failed").replace("{n}", String(result.failed.length)) : "",
@@ -1307,7 +1307,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			try {
 				const result = await apiBody({ op: "restore", token }, 120000);
 				const count = (result.restored || []).length;
-				const parts = [count > 0 ? t("undo.done").replace("{n}", String(count)) : t("undo.already")];
+				const parts = [(count > 0 && !result.alreadyGone) ? t("undo.done").replace("{n}", String(count)) : t("undo.already")];
 				if (result.recordRestored) parts.push(t("trash.recordBack"));
 				if (result.conflicts && result.conflicts.length > 0) parts.push(t("undo.conflicts").replace("{n}", String(result.conflicts.length)));
 				if (result.failed && result.failed.length > 0) parts.push(t("undo.failed").replace("{n}", String(result.failed.length)));
