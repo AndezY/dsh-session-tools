@@ -124,6 +124,12 @@ const openBad = await call({ op: 'open', sessionId, path: 'C:/Windows/system32/c
 assert.equal(openBad.data.ok, false)
 assert.equal(openBad.data.error, 'not an artifact of this session')
 console.log('open ok: 越界路径被拒')
+// list：registry 缺席时 registered 为 null（“不知道”），不能误判成已摘
+const listRes = await call({ op: 'list' })
+assert.equal(listRes.data.ok, true)
+assert.ok(Array.isArray(listRes.data.sessions) && listRes.data.sessions.length > 0, 'sessions listed')
+assert.ok(listRes.data.sessions.every((row) => row.registered === null || typeof row.registered === 'boolean'), 'registered flag present')
+console.log('list ok: 带 registered 标记（无 registry 时为 null）')
 // trash：列出批次（带体积 / 是否含会话记录），非法 token 一律拒绝
 const trashList = await call({ op: 'trash' })
 assert.equal(trashList.data.ok, true)

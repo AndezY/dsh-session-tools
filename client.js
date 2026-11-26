@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.8";
+	const VERSION = "0.5.9";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -981,6 +981,22 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		});
 	}
 
+	// 磁盘实况（host 的 list）：只用来判断"这条还在不在侧栏账目里"。
+	// 侧栏的成员关系是 workspace.json 的账目，账目被摘掉之后目录可能还留在磁盘上，
+	// 那种残渣会出现在这里，但不该让人以为侧栏里还有它。
+	let hostRowsCache = null;
+
+	function loadHostRows() {
+		return apiBody({ op: "list" }, 20000)
+			.then((data) => {
+				const map = {};
+				for (const row of (data && data.sessions) || []) map[row.sessionId] = row;
+				hostRowsCache = map;
+				return map;
+			})
+			.catch(() => (hostRowsCache = null));
+	}
+
 	function batchCandidates(seedId) {
 		let snap = null;
 		try { snap = sessions && sessions.list ? sessions.list.getSnapshot() : null; } catch { snap = null; }
@@ -993,10 +1009,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			if (!row) continue;
 			if (row.origin === "subagent" || row.blank) continue;
 			if (cwd !== "" && row.cwd !== cwd) continue;
+			const host = hostRowsCache && hostRowsCache[row.id || key];
 			rows.push({
 				id: row.id || key,
 				title: row.displayTitle || row.title || row.id || key,
 				updatedAt: Number(row.updatedAt) || 0,
+				archived: row.archived === true,
+				// host 说 false = 账目里已经没有了；null/undefined = 不知道，按"在"处理
+				residual: Boolean(host && host.registered === false),
 			});
 		}
 		rows.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1012,12 +1032,17 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		const [running, setRunning] = useState(false);
 		const [log, setLog] = useState([]);
 		const [finished, setFinished] = useState(false);
+		const [hostTick, setHostTick] = useState(0);
+		const [forceable, setForceable] = useState([]);
+		const [tokens, setTokens] = useState([]);
+		const [undoState, setUndoState] = useState("");
 
 		const seedId = req ? req.seedSessionId : null;
 
 		useEffect(() => {
 			if (!req) {
 				setPicked({}); setMode("trash"); setCaps(null); setRunning(false); setLog([]); setFinished(false);
+				setForceable([]); setTokens([]); setUndoState("");
 				return;
 			}
 			let alive = true;
@@ -1029,6 +1054,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					if (next.trash !== true) setMode("delete");
 				})
 				.catch(() => { if (alive) setCaps({}); });
+			loadHostRows().then(() => { if (alive) setHostTick((n) => n + 1); });
 			return () => { alive = false; };
 		}, [req]);
 
@@ -1045,14 +1071,17 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
 		const close = () => { if (!running) setBatch(null); };
 
-		const run = async () => {
-			if (running || selected.length === 0) return;
+		// 一批里逐条删：收集失败项（还活着的可以强制）和回收站 token（可以整批撤销）
+		const runBatch = async (targets, force) => {
+			if (running || targets.length === 0) return;
 			setRunning(true);
-			setLog([]);
 			const rows = [];
-			for (const row of selected) {
+			const live = [];
+			const tokens = [];
+			for (const row of targets) {
 				let ok = true;
 				let error = "";
+				let code = "";
 				try {
 					if (currentSessionId() === row.id && uiWorkspace && typeof uiWorkspace.clearMain === "function") {
 						try { uiWorkspace.clearMain(); } catch { /* ignore */ }
@@ -1064,25 +1093,70 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 						keep: [],
 						keepMode: "stay",
 						trash: mode === "trash",
-						waitForRelease: true,
+						waitForRelease: force !== true,
+						force: force === true,
 					}, 180000);
-					if (result && result.ok === false) { ok = false; error = result.error || ""; }
+					if (result && result.ok === false) {
+						ok = false;
+						error = result.error || "";
+						code = result.code || "";
+					} else {
+						const token = (result && result.logs && result.logs.trashToken)
+							|| (result && result.artifacts && result.artifacts.trashToken);
+						if (token) tokens.push(token);
+					}
 				} catch (err) {
 					ok = false;
 					error = String(err && err.message ? err.message : err);
+					code = (err && err.code) || "";
 				}
+				if (!ok && code === "still-live") live.push({ id: row.id, title: row.title });
 				rows.push({ id: row.id, title: row.title, ok: ok, error: error });
 				setLog(rows.slice());
-				try { if (sessions && typeof sessions.handleSessionRemoved === "function") sessions.handleSessionRemoved(row.id); } catch { /* ignore */ }
+				if (ok) {
+					try { if (sessions && typeof sessions.handleSessionRemoved === "function") sessions.handleSessionRemoved(row.id); } catch { /* ignore */ }
+				}
 			}
 			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+			setForceable(live);
+			if (tokens.length > 0) setTokens((prev) => prev.concat(tokens));
 			setRunning(false);
 			setFinished(true);
 		};
 
+		const run = () => runBatch(selected, false);
+		const runForce = () => runBatch(forceable, true);
+
+		// 整批撤销：逐条还原本批产生的回收站批次
+		const undoBatch = async () => {
+			if (running || tokens.length === 0) return;
+			setRunning(true);
+			setUndoState(t("batch.undoRunning"));
+			let done = 0;
+			let failed = 0;
+			for (const token of tokens) {
+				try {
+					await apiBody({ op: "restore", token }, 120000);
+					done += 1;
+				} catch {
+					failed += 1;
+				}
+			}
+			setUndoState(failed > 0
+				? t("batch.undoPartly").replace("{ok}", String(done)).replace("{bad}", String(failed))
+				: t("batch.undoDone").replace("{n}", String(done)));
+			setTokens([]);
+			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+			setRunning(false);
+		};
+
 		const body = [];
 		body.push(h("div", { key: "title", className: "dst-title" }, t("batch.title")));
+				const residualCount = candidates.filter((row) => row.residual).length;
 		body.push(h("div", { key: "hint", className: "dst-hint" }, t("batch.hint").replace("{n}", String(candidates.length))));
+		if (residualCount > 0) {
+			body.push(h("div", { key: "residual", className: "dst-hint" }, t("batch.residual").replace("{n}", String(residualCount))));
+		}
 
 		if (candidates.length === 0) {
 			body.push(h("div", { key: "none", className: "dst-hint" }, t("batch.empty")));
@@ -1097,7 +1171,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 						checked: picked[row.id] === true,
 						onChange: () => toggle(row.id),
 					}),
-					h("span", { className: "dst-list-path", onClick: () => toggle(row.id) }, row.title),
+					h("span", { className: "dst-list-path", onClick: () => toggle(row.id) },
+						row.title,
+						row.residual ? h("span", { className: "dst-tag dst-tag-warn" }, t("batch.tagResidual")) : null,
+						row.archived ? h("span", { className: "dst-tag" }, t("batch.tagArchived")) : null),
 					h("span", { className: "dst-list-size" },
 						row.updatedAt > 0 ? new Date(row.updatedAt).toLocaleString() : "")))));
 
@@ -1131,13 +1208,27 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				t("batch.done").replace("{ok}", String(log.length - failedCount)).replace("{fail}", String(failedCount))));
 		}
 
+		// 失败里有"会话还开着"的：给一个强制入口，不用一条条回去处理
+		if (forceable.length > 0) {
+			body.push(h("div", { key: "forcehint", className: "dst-hint" }, t("batch.forceHint").replace("{n}", String(forceable.length))));
+		}
+		if (undoState) body.push(h("div", { key: "undo", className: "dst-hint" }, undoState));
+
 		body.push(h("div", { key: "credit", className: "dst-credit" }, t("credit.line").replace("{v}", VERSION)));
 
 		const ops = [];
-		if (finished) {
-			ops.push(h("button", { key: "close", type: "button", className: "dst-btn primary", onClick: () => setBatch(null) }, t("dialog.close")));
-		} else {
-			ops.push(h("button", { key: "cancel", type: "button", className: "dst-btn", onClick: close, disabled: running }, t("dialog.cancel")));
+		ops.push(h("button", { key: "cancel", type: "button", className: "dst-btn", onClick: close, disabled: running }, t("dialog.close")));
+		if (tokens.length > 0) {
+			ops.push(h("button", {
+				key: "undo", type: "button", className: "dst-btn", onClick: undoBatch, disabled: running,
+			}, running && undoState ? t("batch.undoRunning") : t("batch.undo").replace("{n}", String(tokens.length))));
+		}
+		if (forceable.length > 0) {
+			ops.push(h("button", {
+				key: "force", type: "button", className: "dst-btn danger", onClick: runForce, disabled: running,
+			}, t("batch.force").replace("{n}", String(forceable.length))));
+		}
+		if (!finished) {
 			ops.push(h("button", {
 				key: "go", type: "button", className: "dst-btn danger", onClick: run,
 				disabled: running || selected.length === 0,
@@ -1511,7 +1602,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-list-size{flex:none;color:var(--dsw-alias-label-tertiary,#8d8a84)}
 .dst-toggle{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
 .dst-toggle input{margin-top:2px}
-.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
+.dst-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10.5px;line-height:1.5;background:rgba(127,127,127,.18);color:var(--dsw-alias-label-secondary,#a7a39c);font-weight:600}
+.dst-tag-warn{background:rgba(190,120,60,.22);color:#e0a86a}.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
 .dst-footer-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary,#f2f2f2)}
 .dst-trash{max-height:300px}
 .dst-trash-row{gap:10px}
@@ -1528,7 +1620,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-btn{appearance:none;border:1px solid var(--dsw-alias-border-l1,#444);background:transparent;color:inherit;border-radius:8px;padding:7px 14px;cursor:pointer;font:13px/1.2 inherit;font-weight:600}
 .dst-btn:hover:not(:disabled){filter:brightness(1.18)}
 .dst-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.15)}
-.dst-btn.primary{background:rgba(120,160,190,.28);border-color:rgba(150,190,220,.7);color:#e8f2f8}
+.dst-btn.primary{background:#2f6f9e;border-color:#2f6f9e;color:#fff}
+.dst-btn.primary:hover:not(:disabled){background:#3a82b6;border-color:#3a82b6;filter:none}
+.dst-btn.primary:disabled{background:#2a5f88;border-color:#2a5f88;color:#eaf3f9;opacity:.85}
 /* 危险操作要一眼看清：实心红底 + 白字，禁用时保留可读性而不是糊成一片 */
 .dst-btn.danger{background:#b4342f;border-color:#b4342f;color:#fff}
 .dst-btn.danger:hover:not(:disabled){background:#c93a34;border-color:#c93a34;filter:none}
@@ -1636,7 +1730,15 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"undo.already": "这批已经还原过了（文件都在原处）",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
 		"host.staleHint": "这条需要宿主侧重启后才可用：完全退出 DSH 再启动。",
 		"host.forceUnavailable": "宿主侧还是旧版本，不认强制删除。完全退出 DSH 再启动一次就能用。",
-		"trash.purgeUnavailable": "需重启",		"trash.open": "回收站",
+		"trash.purgeUnavailable": "需重启",		"batch.residual": "其中 {n} 条是磁盘上的残留：侧栏里已经没有了（删过一次，账目被摘掉），勾上删掉可以顺手清干净。",
+		"batch.tagResidual": "残留",
+		"batch.tagArchived": "已归档",
+		"batch.force": "强制删除失败的 {n} 条",
+		"batch.forceHint": "有 {n} 条因为会话还开着没删掉：点「强制删除失败的那几条」，会先结束它们再删。",
+		"batch.undo": "撤销这批删除（{n}）",
+		"batch.undoRunning": "正在还原…",
+		"batch.undoDone": "已还原 {n} 批",
+		"batch.undoPartly": "还原 {ok} 批，{bad} 批失败",		"trash.open": "回收站",
 		"trash.title": "回收站",
 		"trash.hint": "删掉的东西（产物文件、会话记录、投影缓存）先放在这里，超 {days} 天自动清理。点「还原」能原路搬回去。",
 		"trash.batches": "批次",
@@ -1745,7 +1847,15 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"undo.already": "Already restored — the files are back in place",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
 		"host.staleHint": "Needs a host restart: quit DSH completely, then start it again.",
 		"host.forceUnavailable": "The host side is an older build and does not know force delete. Quit DSH completely and start it again.",
-		"trash.purgeUnavailable": "Restart needed",		"trash.open": "Recycle bin",
+		"trash.purgeUnavailable": "Restart needed",		"batch.residual": "{n} of these only exist on disk — they were deleted once and dropped from the sidebar. Ticking them cleans up the leftovers.",
+		"batch.tagResidual": "leftover",
+		"batch.tagArchived": "archived",
+		"batch.force": "Force delete the {n} that failed",
+		"batch.forceHint": "{n} could not be deleted because they are still open: use “Force delete” to stop them first.",
+		"batch.undo": "Undo this batch ({n})",
+		"batch.undoRunning": "Restoring…",
+		"batch.undoDone": "Restored {n} batches",
+		"batch.undoPartly": "Restored {ok}, {bad} failed",		"trash.open": "Recycle bin",
 		"trash.title": "Recycle bin",
 		"trash.hint": "Deleted files, session records and caches wait here for {days} days. Restore puts them back where they came from.",
 		"trash.batches": "Batches",

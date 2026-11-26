@@ -610,6 +610,54 @@ assert.ok(textTrash.includes('回收站'), 'trash option rendered')
   console.log('batch ok: 菜单项 + 候选列表')
 }
 
+// ---- 批量：残留标记 + 强制 + 撤销
+{
+  const openBatch = (states) => {
+    resetHooks(states)
+    const overlay = byId['dsh-session-tools.dialog'].component({})
+    const kids = overlay.type === react.Fragment ? overlay.children : [overlay]
+    return kids.find((child) => child && child.type && child.type.name === 'BatchDeleteDialog')
+  }
+  const walk3 = (node, out) => {
+    if (!node) return out
+    if (Array.isArray(node)) { for (const kid of node) walk3(kid, out); return out }
+    if (typeof node !== 'object') return out
+    if (node.props) out.push(node)
+    if (node.children) walk3(node.children, out)
+    return out
+  }
+
+  // hooks：req, picked, mode, caps, running, log, finished, hostTick, forceable, tokens, undoState
+  const base = [
+    { seedSessionId: 'a' }, {}, 'trash', { trash: true }, false,
+    [{ id: 'b', title: '甲', ok: false, error: '会话还开着' }], true, 0,
+    [{ id: 'b', title: '甲' }], ['tok-1'], '',
+  ]
+  const el = openBatch(base)
+  const tree = el.type(el.props)
+  const text = JSON.stringify(tree)
+  assert.ok(text.includes('强制删除失败的 1 条'), 'force retry button shown for still-live failures')
+  assert.ok(text.includes('撤销这批删除（1）'), 'batch undo button shown when trash tokens exist')
+
+  // 点强制 → 带 force:true 重发
+  const forceBtn = walk3(tree, []).filter((n) => n.type === 'button')
+    .find((b) => JSON.stringify(b.children || []).includes('强制删除失败的 1 条'))
+  forceBtn.props.onClick()
+  await new Promise((r) => setImmediate(r))
+  const call = fetchCalls.filter((c) => c.body && c.body.op === 'delete').pop()
+  assert.ok(call && call.body.force === true, 'force batch delete sends force:true')
+  assert.equal(call.body.waitForRelease, false, 'force batch skips the release wait')
+
+  // 点撤销 → 逐条 restore
+  const undoBtn = walk3(tree, []).filter((n) => n.type === 'button')
+    .find((b) => JSON.stringify(b.children || []).includes('撤销这批删除'))
+  undoBtn.props.onClick()
+  await new Promise((r) => setImmediate(r))
+  const undoCall = fetchCalls.filter((c) => c.body && c.body.op === 'restore').pop()
+  assert.ok(undoCall && undoCall.body.token === 'tok-1', 'batch undo restores each token')
+  console.log('batch ok: 残留/强制/撤销 都在')
+}
+
 // ---- 宿主版本对不上：要明确说出来，而不是让人对着按钮发呆
 {
   const api = loaded.exports.apply.__test
