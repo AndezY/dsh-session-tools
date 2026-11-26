@@ -201,7 +201,30 @@ const trash2 = core.deleteSession({
 assert.equal(trash2.ok, true, 'empty deletion still fine')
 console.log('trash-empty ok')
 
-// purgeTrashEntry：彻底删掉一批（先造一个真有日志目录的会话）
+// 连点两次还原：第二次必须是"已经还原过了"，而不是失败
+{
+  const sid = 'session-test-twice-1357-2468-999988887777'
+  const dir = path.join(tmpHome, 'sessions', group, sid)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: sid, cwd: wsDir }) + '\n')))
+  const first = core.deleteSession({ sessionId: sid, deleteArtifacts: true, trash: true })
+  assert.equal(first.ok, true, JSON.stringify(first))
+  const token = first.logs.trashToken
+  assert.ok(token, 'token')
+
+  const one = core.restoreTrash(token)
+  assert.equal(one.ok, true, 'first restore ok: ' + JSON.stringify(one.error || ''))
+  assert.equal(one.recordRestored, true)
+
+  const two = core.restoreTrash(token)
+  assert.equal(two.ok, true, 'second restore must not be a failure: ' + JSON.stringify(two.error || ''))
+  assert.equal(two.recordRestored, true, 'second restore reports already-restored')
+  assert.equal(two.failed.length, 0, 'no failure entries on the second try')
+  assert.ok(fs.existsSync(dir), 'session directory is back')
+  console.log('restore twice ok: 第二次数幂等，不再报失败')
+}
+
+// purgeTrashEntry：彻底删掉一批// purgeTrashEntry：彻底删掉一批（先造一个真有日志目录的会话）
 const purgeSessionId = 'session-test-purge-2468-1357-999999999999'
 const purgeDir = path.join(tmpHome, 'sessions', group, purgeSessionId)
 fs.mkdirSync(purgeDir, { recursive: true })

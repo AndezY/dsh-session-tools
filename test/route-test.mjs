@@ -161,6 +161,32 @@ const caps = await call({ op: 'ping' })
 assert.equal(caps.data.caps.purge, true, 'host advertises purge')
 assert.equal(caps.data.caps.force, true, 'host advertises force')
 console.log('caps ok: purge / force 都对外声明，界面才能按能力放按钮')
+// restore 并发去重 + 幂等：连点两次不能变成"失败"
+{
+  const sid = 'session-route-twice-1357-2468-000011112222'
+  const dir = path.join(tmpHome, 'sessions', '--tmp--', sid)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: sid, cwd: wsDir }) + '\n')))
+  const del = await call({ op: 'delete', sessionId: sid, deleteArtifacts: false, trash: true })
+  const token = del.data.logs && del.data.logs.trashToken
+  assert.ok(token, 'token issued')
+
+  // 同时打两枪（用户连点就是这种形状）
+  const [a, b] = await Promise.all([
+    call({ op: 'restore', token }),
+    call({ op: 'restore', token }),
+  ])
+  assert.equal(a.data.ok, true, 'first ok: ' + JSON.stringify(a.data.error || ''))
+  assert.equal(b.data.ok, true, 'second ok: ' + JSON.stringify(b.data.error || ''))
+  assert.ok(b.data.deduped === true || b.data.recordRestored === true, 'second call deduped or already-restored')
+  assert.ok(fs.existsSync(dir), 'record is back on disk')
+
+  // 再来一次（顺序调用）：还是成功
+  const again = await call({ op: 'restore', token })
+  assert.equal(again.data.ok, true, 'third call stays idempotent: ' + JSON.stringify(again.data.error || ''))
+  console.log('restore ok: 并发/重复调用都不再报失败')
+}
+
 // force：会话还挂在宿主里 → 普通删除报 still-live，强制删除照删不误
 const forceSessionId = 'session-route-force-1111-2222-333333333333'
 const forceDir = path.join(tmpHome, 'sessions', '--tmp--', forceSessionId)

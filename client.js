@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.7";
+	const VERSION = "0.5.8";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -552,8 +552,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			setNotice({ text: "", busy: true });
 			try {
 				const result = await apiBody({ op: "restore", token }, 60000);
+				const count = (result.restored || []).length;
 				const rows = [
-					t("undo.done").replace("{n}", String((result.restored || []).length)),
+					count > 0 ? t("undo.done").replace("{n}", String(count)) : t("undo.already"),
+					result.recordRestored ? t("trash.recordBack") : "",
 					(result.conflicts && result.conflicts.length > 0) ? t("undo.conflicts").replace("{n}", String(result.conflicts.length)) : "",
 					(result.failed && result.failed.length > 0) ? t("undo.failed").replace("{n}", String(result.failed.length)) : "",
 				].filter(Boolean).join("  ");
@@ -561,6 +563,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			} catch (err) {
 				setNotice({ text: t("undo.error").replace("{msg}", String(err && err.message ? err.message : err)), busy: false });
 			}
+			// 删的时候那一行已经从侧栏摘掉了，还原完要重新拉一次列表才回来
+			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
 		};
 
 		const confirm = async (force) => {
@@ -1302,7 +1306,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			setNotice("");
 			try {
 				const result = await apiBody({ op: "restore", token }, 120000);
-				const parts = [t("undo.done").replace("{n}", String((result.restored || []).length))];
+				const count = (result.restored || []).length;
+				const parts = [count > 0 ? t("undo.done").replace("{n}", String(count)) : t("undo.already")];
 				if (result.recordRestored) parts.push(t("trash.recordBack"));
 				if (result.conflicts && result.conflicts.length > 0) parts.push(t("undo.conflicts").replace("{n}", String(result.conflicts.length)));
 				if (result.failed && result.failed.length > 0) parts.push(t("undo.failed").replace("{n}", String(result.failed.length)));
@@ -1313,6 +1318,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				setNotice(t("undo.error").replace("{msg}", String(err && err.message ? err.message : err)));
 			} finally {
 				setBusy("");
+				// 还原会让会话重新出现在侧栏
+				try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
 			}
 		};
 
@@ -1626,7 +1633,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "完成：成功 {ok} 个，失败 {fail} 个。",
 		"dialog.force": "强制结束并删除",
 		"dialog.forceHint": "先取消正在跑的回合，再硬拆宿主里的会话对象，然后删文件。若它还开在别的面板里，那个面板会报读取失败——这属于预期。",
-		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
+		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"undo.already": "这批已经还原过了（文件都在原处）",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
 		"host.staleHint": "这条需要宿主侧重启后才可用：完全退出 DSH 再启动。",
 		"host.forceUnavailable": "宿主侧还是旧版本，不认强制删除。完全退出 DSH 再启动一次就能用。",
 		"trash.purgeUnavailable": "需重启",		"trash.open": "回收站",
@@ -1735,7 +1742,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "Done: {ok} succeeded, {fail} failed.",
 		"dialog.force": "Force delete",
 		"dialog.forceHint": "Cancels the running turn, tears the live session out of the host, then deletes the files. Any other panel still showing it will fail to read — that is expected.",
-		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
+		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"undo.already": "Already restored — the files are back in place",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
 		"host.staleHint": "Needs a host restart: quit DSH completely, then start it again.",
 		"host.forceUnavailable": "The host side is an older build and does not know force delete. Quit DSH completely and start it again.",
 		"trash.purgeUnavailable": "Restart needed",		"trash.open": "Recycle bin",
