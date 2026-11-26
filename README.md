@@ -52,7 +52,23 @@ Get-FileHash .\install.cmd -Algorithm SHA256
 按 `1` → 重新打开。安装器会自己找 `DSH_HOME`、改 `package.json`、跑 pnpm，
 并且带备份、带 `--status` / `--uninstall`。
 
-**④ 手动装**
+**④ 在 DSH「插件 → 添加插件」对话框里装（国内网络推荐这两条）**
+
+那个输入框收四种写法（解析规则来自 `@deepseek-ai/dsh-plugin-manager` 的 `parseInstallSpec`）：
+
+| 写法 | 例子 | 说明 |
+|---|---|---|
+| npm 包名 | `dsh-session-tools` | 走 npm registry，下拉里可选「中国大陆镜像源」。**注意**：npm 上 `dsh-session-tools` 这个名字已经被人占了（0.1.0），本插件没有发布到 npm |
+| git 仓库 | `github:AndezY/dsh-session-tools`<br>`https://github.com/AndezY/dsh-session-tools`<br>`https://gitee.com/<你的id>/dsh-session-tools` | pnpm 直接 clone，**「中国大陆镜像源」对它无效**，国内需要代理 |
+| tarball | `C:\Downloads\dsh-session-tools.tgz`<br>`https://.../dsh-session-tools.tgz` | 本地绝对路径或 http(s) 地址，`release/dsh-session-tools.tgz` 就是这份 |
+| 本地目录 | `C:\Downloads\dsh-session-tools` | **绝对路径**，指向含 `package.json` 的那个目录；零网络，最稳 |
+
+国内最省事的两种：
+
+1. 下载 [`release/dsh-session-tools.tgz`](release/dsh-session-tools.tgz)，对话框里填它的**绝对路径**
+2. 下载 [`release/installer-windows.cmd`](release/installer-windows.cmd) 双击（完全不走这个对话框，也不需要网络，因为它把插件整包塞在文件里）
+
+**⑤ 手动装**
 
 ```bash
 git clone https://github.com/AndezY/dsh-session-tools ~/.dsh/plugins/dsh-session-tools
