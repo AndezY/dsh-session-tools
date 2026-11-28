@@ -1,4 +1,4 @@
-dsh-session-tools 0.5.12 —— 给 DeepSeek Harness 的「会话删除」插件
+dsh-session-tools 0.5.13 —— 给 DeepSeek Harness 的「会话删除」插件
 原创作者：Weilong　·　免费开源（MIT）：保留署名即可自由使用、修改、再分发
 ==========================================================
 

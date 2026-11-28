@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.12";
+	const VERSION = "0.5.13";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -100,6 +100,17 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		try {
 			if (workspaces && typeof workspaces.refreshSnapshot === "function") workspaces.refreshSnapshot();
 		} catch { /* 忽略 */ }
+	}
+
+	/**
+	 * 删完再补刷两次（0.8s / 2s）。
+	 * 宿主那边"放掉会话对象"是异步的：如果它晚一点点才松手，第一次刷新会把它又拉回来，
+	 * 于是看起来"删了还在"。补两次基本能追上，不用重启也不用重载窗口。
+	 */
+	function scheduleLateRefresh() {
+		const again = () => { refreshLists().catch(() => {}); };
+		setTimeout(again, 800);
+		setTimeout(again, 2000);
 	}
 
 	async function evictSessionRow(sessionId) {
@@ -612,6 +623,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				}, 120000);
 				setDone(result);
 				await evictSessionRow(sessionId);
+				scheduleLateRefresh();
 				if (wasCurrent) {
 					try { if (uiWorkspace && typeof uiWorkspace.startSession === "function") uiWorkspace.startSession(); } catch { /* ignore */ }
 				}
@@ -1147,6 +1159,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			if (tokens.length > 0) setTokens((prev) => prev.concat(tokens));
 			setRunning(false);
 			setFinished(true);
+			scheduleLateRefresh();
 		};
 
 		const run = () => runBatch(selected, false);
@@ -1519,7 +1532,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
 		const ops = [];
 		ops.push(h("button", { key: "folder", type: "button", className: "dst-btn", onClick: () => reveal("") }, t("trash.openFolder")));
-		ops.push(h("button", { key: "refresh", type: "button", className: "dst-btn", onClick: load, disabled: busy === "load" }, t("trash.refresh")));
+		ops.push(h("button", {
+			key: "refresh", type: "button", className: "dst-btn", disabled: busy === "load",
+			onClick: () => { load(); refreshLists().catch(() => {}); },
+		}, t("trash.refresh")));
 		ops.push(h("button", { key: "close", type: "button", className: "dst-btn primary", onClick: close }, t("dialog.close")));
 
 		return h("div", {
