@@ -89,6 +89,30 @@ function Resolve-ProfileDir {
     throw "在 $root 里没找到带 dsh.profile.bundles 的 profile"
 }
 
+<# 所有可能被 DSH 加载的 profile：不能只赌 desktop 一个。 #>
+function Resolve-ProfileDirs {
+    param([string]$DshHomePath, [string]$Given)
+    if ($Given) { return @(Resolve-ProfileDir -DshHomePath $DshHomePath -Given $Given) }
+    $root = Join-Path $DshHomePath 'profiles'
+    $found = New-Object System.Collections.ArrayList
+    if (Test-Path -LiteralPath $root) {
+        foreach ($dir in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath (Join-Path $dir.FullName 'package.json')) { [void]$found.Add($dir.FullName) }
+        }
+    }
+    if ($found.Count -eq 0) { return @(Resolve-ProfileDir -DshHomePath $DshHomePath -Given $null) }
+    return @($found.ToArray())
+}
+
+# 从某个目录的 package.json 里读版本号；读不到返回 '-'
+function Get-PkgVersion {
+    param([string]$Dir)
+    if (-not $Dir) { return '-' }
+    $pkg = Join-Path $Dir 'package.json'
+    if (-not (Test-Path -LiteralPath $pkg)) { return '-' }
+    try { return (Read-Manifest -Path $pkg).version } catch { return '?' }
+}
+
 function Get-DshProcesses {
     return @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq 'DeepSeek Harness' })
 }
@@ -318,6 +342,8 @@ function Get-MissingFiles {
 
 function Invoke-Install {
     param([string]$DshHomePath, [string]$ProfileDir, [string]$PackagePath)
+    $profileDirs = @($ProfileDir) + @(Resolve-ProfileDirs -DshHomePath $DshHomePath -Given $null | Where-Object { $_ -ne $ProfileDir })
+    $profileDirs = @($profileDirs | Select-Object -Unique)
 
     Step '1/6 检查 DeepSeek Harness 是否已退出'
     $skipCheck = ($Force -or ($env:DSH_SESSION_TOOLS_FORCE -eq '1'))
@@ -326,6 +352,8 @@ function Invoke-Install {
         return 1
     }
     Ok '没有进程占用'
+    Say ('    DSH_HOME   = ' + $DshHomePath)
+    Say ('    选中的 profile = ' + $ProfileDir)
 
     Step '2/6 解包插件'
     $pluginRoot = Expand-PluginPayload -PackagePath $PackagePath
@@ -343,12 +371,21 @@ function Invoke-Install {
     $sourceDir = Install-PluginSource -PluginRoot $pluginRoot -DshHomePath $DshHomePath
     Ok $sourceDir
 
-    Step '4/6 写 profile 的 package.json（依赖 + bundles 条目）'
-    $backup = Add-BundleEntry -ProfileDir $ProfileDir
-    Ok ('已登记到 ' + (Join-Path $ProfileDir 'package.json'))
-    Ok ('原文件备份：' + (Split-Path -Leaf $backup))
+    Step '4/6 登记到 profile（依赖 + bundles 条目）'
+    if ($profileDirs.Count -gt 1) {
+        Say ('    这台机器上有 ' + $profileDirs.Count + ' 个 profile，全部登记一遍——只写一个的话，DSH 加载的可能是另一个：')
+        foreach ($dirName in $profileDirs) { Say ('      ' + $dirName) }
+    }
+    foreach ($oneProfile in $profileDirs) {
+        try {
+            $backup = Add-BundleEntry -ProfileDir $oneProfile
+            Ok ('已登记到 ' + $oneProfile + '（备份 ' + (Split-Path -Leaf $backup) + '）')
+        } catch {
+            Bad ('登记失败 ' + $oneProfile + '：' + $_.Exception.Message)
+        }
+    }
 
-    Step '5/6 装进 profile 的 node_modules'
+    Step '5/6 装进每个 profile 的 node_modules'
     $runtime = $null
     if (-not $NoPnpm) { $runtime = Find-PnpmRuntime -DshHomePath $DshHomePath }
     $usedPnpm = $false
@@ -361,30 +398,48 @@ function Invoke-Install {
         Warn '没找到 DSH 自带的 node/pnpm，走复制安装（这个插件零外部依赖，复制就够用）'
     }
     $nodeModulesDir = Join-Path $ProfileDir ('node_modules\' + $PluginName)
-    if (-not $usedPnpm -or (Get-MissingFiles -PluginDir $nodeModulesDir).Count -gt 0) {
+    if (-not $usedPnpm -or (Get-MissingFiles -PluginDir $nodeModulesDir).Count -gt 0 -or (Get-PkgVersion -Dir $nodeModulesDir) -ne $version) {
         $nodeModulesDir = Install-PluginCopy -PluginRoot $pluginRoot -ProfileDir $ProfileDir
         Ok ('直接复制到 ' + $nodeModulesDir)
     } else {
         Ok ('pnpm 已落盘：' + $nodeModulesDir)
     }
+    # 其余 profile 一律直接复制（零依赖，最快也最确定）
+    foreach ($oneProfile in $profileDirs) {
+        if ($oneProfile -eq $ProfileDir) { continue }
+        try {
+            $copied = Install-PluginCopy -PluginRoot $pluginRoot -ProfileDir $oneProfile
+            Ok ('复制到 ' + $copied)
+        } catch {
+            Bad ('复制失败 ' + $oneProfile + '：' + $_.Exception.Message)
+        }
+    }
 
-    Step '6/6 校验'
-    $missing = Get-MissingFiles -PluginDir $nodeModulesDir
-    if ($missing.Count -gt 0) {
-        Bad ('缺文件：' + ($missing -join ', '))
-    } else {
-        Ok 'node_modules 里的文件齐全'
-    }
-    $manifest = Read-Manifest -Path (Join-Path $ProfileDir 'package.json')
-    if ($manifest.dsh.profile.bundles -contains $PluginName) {
-        Ok 'bundles 里已经有 dsh-session-tools'
-    } else {
-        Bad 'bundles 里没有 dsh-session-tools，加载器不会加载它'
-    }
-    if ($manifest.dependencies.PSObject.Properties[$PluginName]) {
-        Ok ('依赖已登记：' + $manifest.dependencies.$PluginName)
-    } else {
-        Bad 'package.json 里没有登记依赖'
+    Step '6/6 校验（回读磁盘上的版本，不是"我以为"）'
+    Say ('    本次安装的版本：' + $version)
+    $srcVersion = Get-PkgVersion -Dir (Join-Path (Join-Path $DshHomePath 'plugins') $PluginName)
+    if ($srcVersion -eq $version) { Ok ('plugins\' + $PluginName + ' = ' + $srcVersion) }
+    else { Bad ('plugins\' + $PluginName + ' = ' + $srcVersion + '（应该是 ' + $version + '）') }
+
+    foreach ($oneProfile in $profileDirs) {
+        $nm = Join-Path $oneProfile ('node_modules\' + $PluginName)
+        $missing = Get-MissingFiles -PluginDir $nm
+        if ($missing.Count -gt 0) {
+            Bad ((Split-Path -Leaf $oneProfile) + ' 缺文件：' + ($missing -join ', '))
+            continue
+        }
+        $installedVersion = Get-PkgVersion -Dir $nm
+        if ($installedVersion -eq $version) {
+            Ok ((Split-Path -Leaf $oneProfile) + ' : node_modules 里的版本 = ' + $installedVersion)
+        } else {
+            Bad ((Split-Path -Leaf $oneProfile) + ' : node_modules 里的版本 = ' + $installedVersion + '（应该是 ' + $version + '）')
+        }
+        $manifest = Read-Manifest -Path (Join-Path $oneProfile 'package.json')
+        if (($manifest.dsh.profile.bundles -contains $PluginName) -and $manifest.dependencies.PSObject.Properties[$PluginName]) {
+            Ok ((Split-Path -Leaf $oneProfile) + ' : package.json 已登记（bundles + 依赖）')
+        } else {
+            Bad ((Split-Path -Leaf $oneProfile) + ' : package.json 没登记全')
+        }
     }
 
     try { Remove-Item -LiteralPath (Split-Path -Parent $pluginRoot) -Recurse -Force } catch { }
@@ -397,7 +452,10 @@ function Invoke-Install {
         Say ''
         Say '想确认插件已加载，可在终端跑：'
         Say '  Invoke-WebRequest http://127.0.0.1:19387/session-tools/api -Method POST -Body ''{"op":"ping"}'' -ContentType ''application/json'''
-        Say '  返回里 version 应该是 0.2.0，registry 是 True。'
+        Say ('  返回里 version 应该是 ' + $version + '，author 是 Weilong。')
+        Say ''
+        Say '如果 DSH 的插件列表里仍然显示旧版本号：那是宿主进程还在跑旧代码。'
+        Say '插件列表读的是进程启动时的快照 —— 托盘右键退出、确认任务管理器里没有 DeepSeek Harness，再启动一次。'
     } else {
         Write-Host ('安装过程中有 ' + $script:failures + ' 处失败，见上面的红字。') -ForegroundColor Red
         Say '可以把整个窗口截图发给插件作者。'

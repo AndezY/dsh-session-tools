@@ -121,6 +121,10 @@ console.log('bundle ok:', loaded.id, '| inject:', exported.inject.join(','))
 const dicts = []
 const removedRows = []
 let refreshed = 0
+// 侧栏成员关系在 workspaces 里：删除后必须 refreshSnapshot，否则那一行要切走再回来才消失
+let workspacesRefresh = 0
+const workspacesStub = { refreshSnapshot: () => { workspacesRefresh += 1 } }
+
 const sessionsStub = {
   list: { getSnapshot: () => ({ ids: [], byId: {} }) },
   handleSessionRemoved: (id) => { removedRows.push(id) },
@@ -139,7 +143,7 @@ const ctx = {
     inject: (name, fn) => fn(),
     register: (meta, component) => { registrations.push({ meta, component }); return () => {} },
   },
-  inject: (names, cb) => cb({ uiWorkspace: null, sessions: sessionsStub }),
+  inject: (names, cb) => cb({ uiWorkspace: null, sessions: sessionsStub, workspaces: workspacesStub }),
 }
 
 exported.apply(ctx)
@@ -218,6 +222,7 @@ assert.equal((json.match(/dst-list-tags/g) || []).length, 2, 'source tags render
 assert.ok(json.includes('交付物'), 'deliverable tag localized')
 assert.ok(json.includes('全部保留') && json.includes('全部不保留'), 'bulk keep buttons present')
 console.log('dialog ok: 标题 / 记录 / 产物列表（每行一个保留勾选框）都已渲染')
+assert.equal(workspacesRefresh, 0, 'workspaces not refreshed before deleting')
 
 // ---- 确认删除：当前没有主面板占着它 → waitForRelease=false；删完本地摘行 + refresh
 const modalEl = tree.children[0]
@@ -236,6 +241,8 @@ assert.equal(deleteCall.body.sessionId, 'session-x')
 assert.equal(deleteCall.body.waitForRelease, false, 'nothing retained it, so no release wait')
 assert.deepEqual(removedRows, ['session-x'], 'row evicted from the local list')
 assert.equal(refreshed, 1, 'authoritative list refresh requested')
+assert.ok(workspacesRefresh > 0, 'sidebar membership refreshed after delete：否则那一行要切走再回来才消失')
+console.log('refresh ok: 删除后 refreshSnapshot 被调用 ' + workspacesRefresh + ' 次')
 console.log('confirm -> delete op:', JSON.stringify(deleteCall.body))
 
 // ---- 删的就是当前会话：先让出主面板，再等宿主放开引用
@@ -252,7 +259,7 @@ const uiWorkspaceStub = {
   startSession: () => { started.push('startSession') },
   openSession: (id) => { reopened.push(id) },
 }
-const ctxCurrent = Object.assign({}, ctx, { inject: (names, cb) => cb({ uiWorkspace: uiWorkspaceStub, sessions: currentSessions }) })
+const ctxCurrent = Object.assign({}, ctx, { inject: (names, cb) => cb({ uiWorkspace: uiWorkspaceStub, sessions: currentSessions, workspaces: workspacesStub }) })
 exported.apply(ctxCurrent)
 
 resetHooks([])
@@ -591,7 +598,7 @@ assert.ok(textTrash.includes('回收站'), 'trash option rendered')
     handleSessionRemoved: () => {},
     refresh: async () => {},
   }
-  exported.apply(Object.assign({}, ctx, { inject: (names, cb) => cb({ uiWorkspace: null, sessions: batchSessions }) }))
+  exported.apply(Object.assign({}, ctx, { inject: (names, cb) => cb({ uiWorkspace: null, sessions: batchSessions, workspaces: workspacesStub }) }))
 
   const batchMenu = byId['dsh-session-tools.batch']
   assert.ok(batchMenu, 'batch menu item registered')

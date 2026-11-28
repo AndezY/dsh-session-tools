@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.9";
+	const VERSION = "0.5.12";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -20,6 +20,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
 	let uiWorkspace = null;
 	let sessions = null;
+	// 侧栏的"哪条会话属于哪个工作区"存在 workspaces 服务里，跟 sessions 是两个 store。
+	// 只刷 sessions 的话，那一行要等你切走再回来才消失。
+	let workspaces = null;
 
 	function apiBody(payload, timeoutMs) {
 		const ctrl = new AbortController();
@@ -81,13 +84,29 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	}
 
 	/** 删完立刻把这一行从本地列表摘掉，再拉一次权威列表。 */
+	/**
+	 * 让侧栏立刻和磁盘对齐。
+	 * - workspaces.refreshSnapshot()：工作区成员关系（侧栏那一行属于谁）
+	 * - sessions.refresh()：会话列表本身
+	 * 只调其中一个，就会出现"删完了但那一行还在，切走再回来才没"。
+	 */
+	async function refreshLists() {
+		try {
+			if (workspaces && typeof workspaces.refreshSnapshot === "function") workspaces.refreshSnapshot();
+		} catch { /* 版本不同，忽略 */ }
+		try {
+			if (sessions && typeof sessions.refresh === "function") await sessions.refresh();
+		} catch { /* 忽略 */ }
+		try {
+			if (workspaces && typeof workspaces.refreshSnapshot === "function") workspaces.refreshSnapshot();
+		} catch { /* 忽略 */ }
+	}
+
 	async function evictSessionRow(sessionId) {
 		try {
 			if (sessions && typeof sessions.handleSessionRemoved === "function") sessions.handleSessionRemoved(sessionId);
 		} catch { /* ignore */ }
-		try {
-			if (sessions && typeof sessions.refresh === "function") await sessions.refresh();
-		} catch { /* ignore */ }
+		await refreshLists();
 	}
 
 	/* --------------------------------------------------------------- 删除请求状态 */
@@ -564,7 +583,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				setNotice({ text: t("undo.error").replace("{msg}", String(err && err.message ? err.message : err)), busy: false });
 			}
 			// 删的时候那一行已经从侧栏摘掉了，还原完要重新拉一次列表才回来
-			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+			await refreshLists();
 		};
 
 		const confirm = async (force) => {
@@ -839,6 +858,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 			if (done.forced) {
 				body.push(h("div", { key: "forced", className: "dst-hint" }, t("done.forced")));
 			}
+			if (done.passes > 1) {
+				body.push(h("div", { key: "passes", className: "dst-hint" }, t("done.passes").replace("{n}", String(done.passes))));
+			}
 
 			if (exportDir) {
 				body.push(h("div", { key: "exportinfo", className: "dst-hint" },
@@ -866,6 +888,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		if (notice.text) body.push(h("div", { key: "notice", className: "dst-hint" }, notice.text));
 
 		if (error) body.push(h("div", { key: "error", className: "dst-error" }, error));
+		if (done && done.pending) {
+			body.push(h("div", { key: "pending", className: "dst-warn" }, done.warning || t("done.pending")));
+		}
 		if (forceAvail && !canForce) {
 			body.push(h("div", { key: "forceblocked", className: "dst-hint" }, t("host.forceUnavailable")));
 		}
@@ -1117,7 +1142,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 					try { if (sessions && typeof sessions.handleSessionRemoved === "function") sessions.handleSessionRemoved(row.id); } catch { /* ignore */ }
 				}
 			}
-			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+			await refreshLists();
 			setForceable(live);
 			if (tokens.length > 0) setTokens((prev) => prev.concat(tokens));
 			setRunning(false);
@@ -1146,7 +1171,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				? t("batch.undoPartly").replace("{ok}", String(done)).replace("{bad}", String(failed))
 				: t("batch.undoDone").replace("{n}", String(done)));
 			setTokens([]);
-			try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+			await refreshLists();
 			setRunning(false);
 		};
 
@@ -1403,14 +1428,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				if (result.conflicts && result.conflicts.length > 0) parts.push(t("undo.conflicts").replace("{n}", String(result.conflicts.length)));
 				if (result.failed && result.failed.length > 0) parts.push(t("undo.failed").replace("{n}", String(result.failed.length)));
 				setNotice(parts.join("　"));
-				try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+				await refreshLists();
 				load();
 			} catch (err) {
 				setNotice(t("undo.error").replace("{msg}", String(err && err.message ? err.message : err)));
 			} finally {
 				setBusy("");
 				// 还原会让会话重新出现在侧栏
-				try { if (sessions && typeof sessions.refresh === "function") await sessions.refresh(); } catch { /* ignore */ }
+				await refreshLists();
 			}
 		};
 
@@ -1727,7 +1752,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "完成：成功 {ok} 个，失败 {fail} 个。",
 		"dialog.force": "强制结束并删除",
 		"dialog.forceHint": "先取消正在跑的回合，再硬拆宿主里的会话对象，然后删文件。若它还开在别的面板里，那个面板会报读取失败——这属于预期。",
-		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"undo.already": "这批已经还原过了（文件都在原处）",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
+		"done.forced": "该会话当时仍挂在宿主里，已强制结束并删除。",		"done.pending": "这个会话没删干净：宿主里那个对象还活着，把日志又写回来了。完全退出 DSH 再删一次。",
+		"done.passes": "宿主把文件写回来了，已经自动重删（共 {n} 轮）。",		"undo.already": "这批已经还原过了（文件都在原处）",		"host.stale": "宿主侧插件是 {host}，界面是 {ui}：两边对不上。DSH 的宿主代码只在进程启动时加载一次——请「完全退出」DSH（不是关窗口）再重新启动。",
 		"host.staleHint": "这条需要宿主侧重启后才可用：完全退出 DSH 再启动。",
 		"host.forceUnavailable": "宿主侧还是旧版本，不认强制删除。完全退出 DSH 再启动一次就能用。",
 		"trash.purgeUnavailable": "需重启",		"batch.residual": "其中 {n} 条是磁盘上的残留：侧栏里已经没有了（删过一次，账目被摘掉），勾上删掉可以顺手清干净。",
@@ -1844,7 +1870,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.done": "Done: {ok} succeeded, {fail} failed.",
 		"dialog.force": "Force delete",
 		"dialog.forceHint": "Cancels the running turn, tears the live session out of the host, then deletes the files. Any other panel still showing it will fail to read — that is expected.",
-		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"undo.already": "Already restored — the files are back in place",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
+		"done.forced": "That session was still live in the host; it was force-stopped and deleted.",		"done.pending": "This session was not fully deleted: the live object wrote its log back. Quit DSH completely and delete it again.",
+		"done.passes": "The host wrote the files back, so the delete was retried ({n} passes).",		"undo.already": "Already restored — the files are back in place",		"host.stale": "The host plugin is {host} but this UI is {ui}. DSH loads host code once at process start — quit DSH completely (not just the window) and start it again.",
 		"host.staleHint": "Needs a host restart: quit DSH completely, then start it again.",
 		"host.forceUnavailable": "The host side is an older build and does not know force delete. Quit DSH completely and start it again.",
 		"trash.purgeUnavailable": "Restart needed",		"batch.residual": "{n} of these only exist on disk — they were deleted once and dropped from the sidebar. Ticking them cleans up the leftovers.",
@@ -1916,9 +1943,10 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
 		try {
 			if (typeof ctx.inject === "function") {
-				ctx.inject(["uiWorkspace", "sessions"], (host) => {
+				ctx.inject(["uiWorkspace", "sessions", "workspaces"], (host) => {
 					uiWorkspace = host.uiWorkspace || null;
 					sessions = host.sessions || null;
+					workspaces = host.workspaces || null;
 				});
 			}
 		} catch { /* 可选依赖，缺了也能删（只是不自动归档） */ }
