@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.13";
+	const VERSION = "0.5.14";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -1378,6 +1378,110 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 
 	function openTrashPanel() { setTrash({ open: true }); }
 
+	/* ------------------------------------------------- 手动刷新（侧栏图标 + 页脚按钮） */
+
+	let refreshFlash = "";
+
+	/** 从宿主重新拉一遍会话与工作区列表；顺手给个肉眼可见的反馈。 */
+	async function refreshNow(setLabel) {
+		const say = (text) => {
+			refreshFlash = text;
+			if (typeof setLabel === "function") setLabel(text);
+		};
+		say("…");
+		const before = countSidebarRows();
+		try {
+			await refreshLists();
+		} catch { /* 忽略 */ }
+		const after = countSidebarRows();
+		const delta = before - after;
+		say(delta > 0 ? "少了 " + delta + " 条" : (delta < 0 ? "多了 " + (-delta) + " 条" : "已刷新"));
+		setTimeout(() => { refreshFlash = ""; if (typeof setLabel === "function") setLabel(""); }, 2200);
+	}
+
+	/** 数一下侧栏里现在挂着多少条会话行（只用来给刷新按钮做前后对比）。 */
+	function countSidebarRows() {
+		try {
+			const snap = sessions && sessions.list ? sessions.list.getSnapshot() : null;
+			const byId = snap && snap.byId ? snap.byId : {};
+			return Object.keys(byId).length;
+		} catch {
+			return 0;
+		}
+	}
+
+	/**
+	 * 在工作区的搜索图标旁边插一个刷新按钮。
+	 * DSH 在那一排没有留 slot，只能贴到搜索按钮后面；用 MutationObserver 跟着 React 的重渲染走，
+	 * 组件卸载时连观察器和按钮一起清掉。
+	 */
+	function useHeaderRefreshButton() {
+		useEffect(() => {
+			let timer = null;
+			let observer = null;
+			let flashing = "";
+			const mark = "data-dsst-refresh";
+
+			const ensure = () => {
+				if (!document.body) return;
+				if (document.querySelector("[" + mark + "]")) return;
+				const search = [...document.querySelectorAll("button[aria-label]")]
+					.find((el) => /搜索|search/i.test(el.getAttribute("aria-label") || ""));
+				if (!search || !search.parentElement) return;
+				const btn = document.createElement("button");
+				btn.setAttribute(mark, "1");
+				btn.type = "button";
+				btn.className = search.className;
+				btn.title = "刷新列表（重新从宿主拉一遍会话与工作区）";
+				btn.textContent = "⟳";
+				btn.style.marginLeft = "2px";
+				btn.addEventListener("click", async (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					btn.textContent = "…";
+					await refreshNow();
+					btn.textContent = flashing || "✓";
+					setTimeout(() => { btn.textContent = "⟳"; }, 1500);
+				});
+				search.parentElement.insertBefore(btn, search.nextSibling);
+			};
+
+			const schedule = () => {
+				if (timer) return;
+				timer = setTimeout(() => { timer = null; ensure(); }, 400);
+			};
+
+			ensure();
+			schedule();
+			try {
+				observer = new MutationObserver(schedule);
+				observer.observe(document.body, { childList: true, subtree: true });
+			} catch { /* 环境不支持就算了 */ }
+
+			return () => {
+				if (timer) clearTimeout(timer);
+				if (observer) observer.disconnect();
+				for (const node of document.querySelectorAll("[" + mark + "]")) node.remove();
+			};
+		}, []);
+	}
+
+	function RefreshActionButton(props) {
+		const t = useT();
+		const [label, setLabel] = useState("");
+		useHeaderRefreshButton();
+		const wide = props && props.wide !== false;
+		return h("button", {
+			type: "button",
+			className: "dst-footer-btn",
+			title: t("refresh.hint"),
+			"aria-label": t("refresh.hint"),
+			onClick: (event) => { event.preventDefault(); refreshNow(setLabel); },
+		},
+			h("span", { className: "dst-refresh-glyph" }, "⟳"),
+			wide ? h("span", null, label || t("refresh.list")) : null);
+	}
+
 	function TrashActionButton(props) {
 		const t = useT();
 		const wide = props && props.wide !== false;
@@ -1644,7 +1748,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-toggle{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
 .dst-toggle input{margin-top:2px}
 .dst-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10.5px;line-height:1.5;background:rgba(127,127,127,.18);color:var(--dsw-alias-label-secondary,#a7a39c);font-weight:600}
-.dst-tag-warn{background:rgba(190,120,60,.22);color:#e0a86a}.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
+.dst-tag-warn{background:rgba(190,120,60,.22);color:#e0a86a}.dst-refresh-glyph{display:inline-block;font-size:13px;line-height:1}.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
 .dst-footer-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary,#f2f2f2)}
 .dst-trash{max-height:300px}
 .dst-trash-row{gap:10px}
@@ -1780,7 +1884,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.undo": "撤销这批删除（{n}）",
 		"batch.undoRunning": "正在还原…",
 		"batch.undoDone": "已还原 {n} 批",
-		"batch.undoPartly": "还原 {ok} 批，{bad} 批失败",		"trash.open": "回收站",
+		"batch.undoPartly": "还原 {ok} 批，{bad} 批失败",		"refresh.list": "刷新列表",
+		"refresh.hint": "刷新列表：重新从宿主拉一遍会话与工作区（侧栏图标 ⟳ 是同一个功能）",		"trash.open": "回收站",
 		"trash.title": "回收站",
 		"trash.hint": "删掉的东西（产物文件、会话记录、投影缓存）先放在这里，超 {days} 天自动清理。点「还原」能原路搬回去。",
 		"trash.batches": "批次",
@@ -1898,7 +2003,8 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		"batch.undo": "Undo this batch ({n})",
 		"batch.undoRunning": "Restoring…",
 		"batch.undoDone": "Restored {n} batches",
-		"batch.undoPartly": "Restored {ok}, {bad} failed",		"trash.open": "Recycle bin",
+		"batch.undoPartly": "Restored {ok}, {bad} failed",		"refresh.list": "Refresh list",
+		"refresh.hint": "Refresh the sidebar from the host (same as the ⟳ icon next to search)",		"trash.open": "Recycle bin",
 		"trash.title": "Recycle bin",
 		"trash.hint": "Deleted files, session records and caches wait here for {days} days. Restore puts them back where they came from.",
 		"trash.batches": "Batches",
@@ -1949,6 +2055,14 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 		}, () => h(react.Fragment, null, h(StyleTag), h(DeleteSessionDialog), h(BatchDeleteDialog), h(TrashDialog))));
 
 		// 侧栏页脚常驻入口：回收站随时能看、能还原，不用等删完那一刻
+		ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
+			name: "sidebar.footer.action",
+			id: "dsh-session-tools.refresh",
+			order: 40,
+			locale: NS,
+			inject: () => ({ t }),
+		}, RefreshActionButton));
+
 		ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
 			name: "sidebar.footer.action",
 			id: "dsh-session-tools.trash",

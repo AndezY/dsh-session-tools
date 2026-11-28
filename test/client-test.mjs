@@ -156,6 +156,8 @@ assert.ok(byId['dsh-session-tools.dialog'], 'dialog registered')
 assert.equal(byId['dsh-session-tools.dialog'].meta.name, 'shell.overlay')
 assert.ok(byId['dsh-session-tools.trash'], 'recycle bin footer entry registered')
 assert.equal(byId['dsh-session-tools.trash'].meta.name, 'sidebar.footer.action')
+assert.ok(byId['dsh-session-tools.refresh'], 'refresh button registered in the sidebar footer')
+assert.equal(byId['dsh-session-tools.refresh'].meta.name, 'sidebar.footer.action')
 console.log('slots ok:', registrations.map((r) => r.meta.name + '#' + r.meta.id).join(', '))
 
 /** overlay 注册项 → 里层真实的 DeleteSessionDialog 元素。 */

@@ -1,18 +1,18 @@
 {
-    "version":  "0.5.13",
-    "builtAt":  "2026-11-28T14:22:18Z",
+    "version":  "0.5.14",
+    "builtAt":  "2026-11-28T14:32:38Z",
     "files":  {
                   "installer-windows.cmd":  {
-                                                "bytes":  122153,
-                                                "sha256":  "a5f4f543cbcad08a8ce4961f291a2580487050d962fbea9aa042f314ba3f1299"
+                                                "bytes":  123869,
+                                                "sha256":  "248f52490d7feb642136bfa76f39b13892f9da6fd4d2739cc3cbef93fb70409a"
                                             },
                   "installer-mac.zip":  {
-                                            "bytes":  69292,
-                                            "sha256":  "7147a1398a977f212b00f29ee272a52a07c12b95783e20951503d006db1d7fd0"
+                                            "bytes":  70558,
+                                            "sha256":  "47ff4e27472db53b694efc112aa0d3afd3a59e68d3dcc09838e0d91827e965c0"
                                         },
                   "installer-mac.tar.gz":  {
-                                               "bytes":  63579,
-                                               "sha256":  "e82cc6f2e790e6ca51498c5ab28c4e5f5bcd339d74836c8da66f2a9aa3758365"
+                                               "bytes":  64840,
+                                               "sha256":  "fa49fdc88030582258b66a9d02762afca9051778ea1407b12d5353b6883cf79f"
                                            }
               }
 }
