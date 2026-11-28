@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	const name = "dsh-session-tools";
 	const inject = ["slots", "locale"];
 	const NS = "session-tools";
-	const VERSION = "0.5.14";
+	const VERSION = "0.5.15";
 	const API = "/session-tools/api";
 
 	let translate = (key) => key;
@@ -1431,7 +1431,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 				const btn = document.createElement("button");
 				btn.setAttribute(mark, "1");
 				btn.type = "button";
-				btn.className = search.className;
+				btn.className = "dst-header-btn";
 				btn.title = "刷新列表（重新从宿主拉一遍会话与工作区）";
 				btn.textContent = "⟳";
 				btn.style.marginLeft = "2px";
@@ -1748,7 +1748,9 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-toggle{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
 .dst-toggle input{margin-top:2px}
 .dst-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10.5px;line-height:1.5;background:rgba(127,127,127,.18);color:var(--dsw-alias-label-secondary,#a7a39c);font-weight:600}
-.dst-tag-warn{background:rgba(190,120,60,.22);color:#e0a86a}.dst-refresh-glyph{display:inline-block;font-size:13px;line-height:1}.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
+.dst-tag-warn{background:rgba(190,120,60,.22);color:#e0a86a}.dst-header-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:.75}
+.dst-header-btn:hover{opacity:1;background:rgba(127,127,127,.16)}
+.dst-refresh-glyph{display:inline-block;font-size:13px;line-height:1}.dst-footer-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#b9b5ad);border-radius:7px;padding:5px 8px;cursor:pointer;font:12.5px/1.3 inherit}
 .dst-footer-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary,#f2f2f2)}
 .dst-trash{max-height:300px}
 .dst-trash-row{gap:10px}
@@ -1774,14 +1776,25 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 .dst-btn.danger:disabled{background:#8a2b27;border-color:#8a2b27;color:#f7dedd;opacity:.75}
 `;
 
-	function StyleTag() {
-		useEffect(() => {
+	/**
+	 * 样式只插一次，谁调用都幂等，**卸载时也不删**。
+	 * 早先写在组件 effect 里、跟着 componentWillUnmount 一起 remove：
+	 * slot 重挂一次就可能把 <style> 带走，界面立刻退回浏览器默认样式
+	 * （按钮带黑框、回收站面板没有遮罩）。样式不是生命周期资源，别跟着组件走。
+	 */
+	function ensureStyles() {
+		try {
+			if (typeof document === "undefined" || !document.head) return;
+			if (document.querySelector("style[data-dsh-session-tools]")) return;
 			const tag = document.createElement("style");
 			tag.setAttribute("data-dsh-session-tools", "1");
 			tag.textContent = CSS;
 			document.head.append(tag);
-			return () => tag.remove();
-		}, []);
+		} catch { /* ignore */ }
+	}
+
+	function StyleTag() {
+		useEffect(() => { ensureStyles(); }, []);
 		return null;
 	}
 
@@ -2028,6 +2041,7 @@ window.__ModuleLoader__.load({ id: "dsh-session-tools", factory: (require) => {
 	/* ------------------------------------------------------------------ 入口 */
 
 	function apply(ctx) {
+		ensureStyles();
 		ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-session-tools: dictionaries");
 		const t = ctx.locale.bind(NS);
 		translate = t;
